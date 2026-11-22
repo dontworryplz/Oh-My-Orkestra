@@ -1,5 +1,9 @@
 # Sol–Luna Full-Set Orchestra
 
+[![Tests](https://github.com/dontworryplz/Oh-My-Orkestra/actions/workflows/test.yml/badge.svg)](https://github.com/dontworryplz/Oh-My-Orkestra/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Harnesses](https://img.shields.io/badge/Harnesses-OMP%20%7C%20AGY%20%7C%20Claude%20Code-purple.svg)](#architecture-overview)
+
 > **Multi-Harness AI Engineering Orchestra** for **OMP (`oh-my-pi`)**, **Antigravity CLI (`agy`)**, and **Claude Code** — combining **GPT-6.2 Sol**, **GPT-6.2 Astra**, **GPT-6 Luna**, **Claude Opus 5.5 / Sonnet 5.5**, and **Gemini 4 Neon / Hydrogen / Argon / Orchestrators** with controlled nested spawning, STRIDE security gates, isolated `git worktree` execution, telemetry, and 5 integrated sidekick systems.
 
 ---

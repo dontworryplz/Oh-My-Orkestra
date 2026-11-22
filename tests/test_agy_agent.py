@@ -130,6 +130,43 @@ class TestAgyAgent(unittest.TestCase):
         self.assertEqual(data["fallback_from"], "gemini-4-neon-xhigh")
         self.assertEqual(len(data["attempts"]), 2)
 
+    def test_discover_stack_monorepo(self):
+        root = self.base / "monorepo"
+        (root / "backend").mkdir(parents=True)
+        (root / "frontend").mkdir(parents=True)
+        (root / "backend" / "go.mod").write_text("module example.com/app\n", encoding="utf-8")
+        (root / "frontend" / "package.json").write_text(
+            json.dumps({"dependencies": {"react": "^19.0.0"}, "devDependencies": {"vitest": "^2.0.0"}}),
+            encoding="utf-8",
+        )
+        discover = Path(__file__).resolve().parents[1] / "scripts" / "discover-stack.py"
+        proc = subprocess.run([sys.executable, str(discover), "--cwd", str(root)], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        profile = json.loads(proc.stdout)
+        self.assertIn("Go", profile["languages"])
+        self.assertIn("JavaScript", profile["languages"])
+        self.assertIn("React", profile["frameworks"])
+        self.assertIn("Vitest", profile["test_runners"])
+        self.assertTrue((root / ".orchestra" / "REPO_MAP.md").exists())
+
+    def test_smart_route_detects_security_and_ui(self):
+        repo = self.base / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.invalid"], cwd=repo, check=True)
+        (repo / "auth.ts").write_text("export const x = 1;\n", encoding="utf-8")
+        (repo / "Button.tsx").write_text("export const B = () => null;\n", encoding="utf-8")
+        subprocess.run(["git", "add", "auth.ts", "Button.tsx"], cwd=repo, check=True)
+        router = Path(__file__).resolve().parents[1] / "scripts" / "smart-route.py"
+        proc = subprocess.run([sys.executable, str(router), "--staged"], cwd=repo, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        res = json.loads(proc.stdout)
+        self.assertEqual(res["risk"], "high")
+        roles = {r["role"] for r in res["recommended_agents"]}
+        self.assertIn("security-reviewer", roles)
+        self.assertIn("ui-qa-reviewer", roles)
+
 
 if __name__ == "__main__":
     unittest.main()

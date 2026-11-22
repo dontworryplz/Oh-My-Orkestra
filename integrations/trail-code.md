@@ -1,20 +1,43 @@
 # Trail-Code Institutional Memory (`trailhq/Trail-Code`)
 
-Integrates `trail` CLI / `trail mcp` / `.trail/learnings/` across the entire orchestra lifecycle.
+Integrates `trail` CLI, `trail mcp`, and `.trail/learnings/` across the entire Orchestra lifecycle so agents stop repeating solved bugs and discarded architectures.
 
-## 1. Before Exploring (`argon-explorer`, `luna-explorer`, Sol)
+## 1. Pre-Explore Gate (`argon-explorer`, `astra-architect`, `grill-me`, Sol)
 
-- Run `trail ask "<task>" --source` (or query `trail` MCP) **before** grepping or opening source files.
-- If `trail` CLI is not installed, grep `.trail/learnings/` directly.
-- Honor prior decisions and ruled-out approaches so workers never repeat dead ends.
+Before grepping or opening source files:
+```bash
+trail ask "<task or module keywords>" --source
+```
+- If `trail` CLI is absent, grep `.trail/learnings/` directly (match `touches:` and topic keywords).
+- Read matching learnings *before* proposing a plan or delegating slices.
 
-## 2. During Debugging & Implementation (`hydrogen-debugger`, `luna-worker`, `sonnet-worker`)
+## 2. Mid-Session Learning Capture (`hydrogen-debugger`, `luna-worker`, `sonnet-worker`)
 
-- When a test or command fails, run `trail ask` on that area before attempting a speculative fix.
-- When the session uncovers non-obvious knowledge (a bug's real cause after failed attempts, an approach dropped and why, a design choice and its reason, or a user correction), record it:
-  `trail note --title "<plain decision, no filenames>"` (reason + `In the code:` paths/symbols on stdin).
+When a test or command fails while debugging, run `trail ask "<failing area>"` before trying a speculative fix.
+Record a new learning **only** when the session uncovers knowledge that the code diff itself cannot explain to the next engineer:
+- Real root cause of a bug after failed attempts
+- An approach tried and ruled out (and why)
+- An architectural choice between alternatives (and why)
+- A user correction on repository conventions
 
-## 3. Pre-Commit / Review Gate (`neon-code-reviewer`, `opus-auditor`, Sol)
+```bash
+trail note --title "<plain decision in words, no filenames>" <<'EOF'
+## Decided
+- <choice and reason>
 
-- Run `trail check` before committing, pushing, or opening a PR to validate changes against repository learnings.
-- Full reference: `~/.claude/skills/trail/SKILL.md`.
+## Tried and ruled out
+- <rejected option and why it failed>
+
+In the code:
+- `<path/to/file.ext>:<symbol>`
+EOF
+```
+Never record trivial status updates ("PR opened", "tests passed") or machine-local facts (use `--personal` for those).
+
+## 3. Pre-Commit & Pre-Release Gate (`neon-code-reviewer`, `release-manager`, Sol)
+
+Before committing, pushing, or opening a PR:
+```bash
+trail check
+```
+Verify changes do not violate any recorded repository learnings. Full reference: `~/.claude/skills/trail/SKILL.md`.

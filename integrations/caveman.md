@@ -1,15 +1,20 @@
 # Caveman Ultra-Compressed Communication (`juliusbrussee/caveman`)
 
-Use Caveman mode for inter-agent reports, dense status updates, and whenever the user requests `/caveman`, `less tokens`, or terse output.
+Use Caveman mode for inter-agent return reports, dense engineering status updates, and whenever the user requests `/caveman`, `less tokens`, or terse output. Cuts output tokens ~65% without losing technical precision.
 
-## Intensity Levels
+## Intensity Levels & When to Use Each
 
-- **`lite` (Default for all subagent/AGY return reports):** No filler, no hedging, no pleasantries, no tool-call narration. Keep articles and clean sentences. Preserve exact `file:line` paths, symbols, CLI commands, and error strings verbatim.
-- **`full`:** Drop articles (a/an/the), fragments OK, short synonyms. No decorative tables/emoji. Never invent prose abbreviations (`cfg`, `impl`, `fn`) — tokenizer splits them anyway.
-- **`ultra`:** Strip conjunctions when cause-then-effect stays clear. One word when enough. Never alter code, symbols, or error strings.
+| Level | Rules | Best Used For |
+|---|---|---|
+| **`lite`** *(Default)* | No filler, pleasantries, or tool-call narration. Keep articles and clean sentences. | **All OMP & AGY subagent return reports**, PR summaries, audit findings |
+| **`full`** | Drop articles (`a`/`an`/`the`), fragments OK, short synonyms (`fix` not `implement a solution for`). No decorative tables/emoji. | Fast chat updates, iterative debugging loops |
+| **`ultra`** | Strip conjunctions when cause-then-effect stays unambiguous. One word when enough. | High-volume log/diff compression, batch status |
+| **`compress`** | Compresses reference docs/memory files while preserving exact anchors. | Long `.orchestra/handoff.md` or `.trail/learnings/` summaries |
 
-## Persistence & Language Rule
+## Strict Preservation Rules (Never Compress These)
 
-- Preserve the user's dominant language (e.g., Turkish user -> terse Turkish; English user -> terse English).
-- Never announce "caveman mode on" unless asked.
-- Full local skill reference: `~/.claude/skills/caveman/SKILL.md` (plus `caveman-review`, `caveman-commit`, `caveman-compress`).
+1. **Exact Code & Paths:** Never alter `file:line`, symbol names, CLI commands, SQL/JSON keys, or error strings—always quote verbatim.
+2. **No Fake Abbreviations:** Never invent prose abbreviations (`cfg`, `impl`, `req`, `res`, `fn`)—tokenizers split them into the same/more tokens and hurt readability. Standard acronyms (`DB`, `API`, `HTTP`, `SQL`, `JWT`, `SSRF`) are OK.
+3. **Preserve User Language:** Reply in the user's dominant language (Turkish user -> terse Turkish; English user -> terse English). Never announce "caveman mode on" unless asked.
+
+Full local skill suite: `~/.claude/skills/caveman/` (`caveman`, `caveman-review`, `caveman-commit`, `caveman-compress`).

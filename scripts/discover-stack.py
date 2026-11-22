@@ -34,87 +34,106 @@ def detect_stack(root: Path) -> dict[str, Any]:
     package_managers: list[str] = []
     scripts: dict[str, str] = {}
 
-    pkg_path = root / "package.json"
-    if pkg_path.exists():
-        languages.append("JavaScript/TypeScript" if (root / "tsconfig.json").exists() else "JavaScript")
-        pkg = read_json(pkg_path)
-        scripts = {k: str(v) for k, v in pkg.get("scripts", {}).items()}
-        deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+    def add_unique(lst: list[str], item: str) -> None:
+        if item not in lst:
+            lst.append(item)
 
-        for pm_file, pm_name in [
-            ("pnpm-lock.yaml", "pnpm"),
-            ("yarn.lock", "yarn"),
-            ("bun.lockb", "bun"),
-            ("bun.lock", "bun"),
-            ("package-lock.json", "npm"),
-        ]:
-            if (root / pm_file).exists():
-                package_managers.append(pm_name)
+    # Scan root + 1-level service/app/package directories for monorepos (e.g. backend/, frontend/, apps/*)
+    scan_dirs: list[Path] = [root]
+    for sub_name in ("backend", "frontend", "api", "server", "web", "app"):
+        sub = root / sub_name
+        if sub.is_dir():
+            scan_dirs.append(sub)
+    for group in ("apps", "packages"):
+        gdir = root / group
+        if gdir.is_dir():
+            scan_dirs.extend(p for p in sorted(gdir.iterdir())[:10] if p.is_dir())
 
-        fw_map = {
-            "next": "Next.js",
-            "react": "React",
-            "vue": "Vue",
-            "svelte": "Svelte",
-            "astro": "Astro",
-            "@nestjs/core": "NestJS",
-            "express": "Express",
-            "fastify": "Fastify",
-            "hono": "Hono",
-            "tailwindcss": "Tailwind CSS",
-        }
-        for dep, label in fw_map.items():
-            if dep in deps and label not in frameworks:
-                frameworks.append(label)
+    for base in scan_dirs:
+        rel = "." if base == root else str(base.relative_to(root))
+        pkg_path = base / "package.json"
+        if pkg_path.exists():
+            add_unique(languages, "JavaScript/TypeScript" if (base / "tsconfig.json").exists() else "JavaScript")
+            pkg = read_json(pkg_path)
+            for k, v in pkg.get("scripts", {}).items():
+                key = k if rel == "." else f"{rel}:{k}"
+                scripts[key] = str(v)
+            deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
 
-        db_map = {
-            "prisma": "Prisma",
-            "@prisma/client": "Prisma",
-            "drizzle-orm": "Drizzle ORM",
-            "mongoose": "MongoDB (Mongoose)",
-            "pg": "PostgreSQL",
-            "mysql2": "MySQL",
-            "better-sqlite3": "SQLite",
-            "redis": "Redis",
-            "ioredis": "Redis",
-            "@supabase/supabase-js": "Supabase",
-        }
-        for dep, label in db_map.items():
-            if dep in deps and label not in databases:
-                databases.append(label)
+            for pm_file, pm_name in [
+                ("pnpm-lock.yaml", "pnpm"),
+                ("yarn.lock", "yarn"),
+                ("bun.lockb", "bun"),
+                ("bun.lock", "bun"),
+                ("package-lock.json", "npm"),
+            ]:
+                if (base / pm_file).exists():
+                    add_unique(package_managers, pm_name)
 
-        test_map = {
-            "vitest": "Vitest",
-            "jest": "Jest",
-            "@playwright/test": "Playwright",
-            "playwright": "Playwright",
-            "cypress": "Cypress",
-        }
-        for dep, label in test_map.items():
-            if dep in deps and label not in test_runners:
-                test_runners.append(label)
+            fw_map = {
+                "next": "Next.js",
+                "react": "React",
+                "vue": "Vue",
+                "svelte": "Svelte",
+                "astro": "Astro",
+                "@nestjs/core": "NestJS",
+                "express": "Express",
+                "fastify": "Fastify",
+                "hono": "Hono",
+                "tailwindcss": "Tailwind CSS",
+            }
+            for dep, label in fw_map.items():
+                if dep in deps:
+                    add_unique(frameworks, label)
 
-    if (root / "pyproject.toml").exists() or (root / "requirements.txt").exists():
-        languages.append("Python")
-        py_text = ""
-        for p in ("pyproject.toml", "requirements.txt"):
-            if (root / p).exists():
-                py_text += (root / p).read_text(encoding="utf-8", errors="ignore").lower()
-        for key, label in [("fastapi", "FastAPI"), ("django", "Django"), ("flask", "Flask")]:
-            if key in py_text:
-                frameworks.append(label)
-        for key, label in [("sqlalchemy", "SQLAlchemy"), ("psycopg", "PostgreSQL"), ("pymongo", "MongoDB"), ("redis", "Redis")]:
-            if key in py_text and label not in databases:
-                databases.append(label)
-        if "pytest" in py_text:
-            test_runners.append("Pytest")
+            db_map = {
+                "prisma": "Prisma",
+                "@prisma/client": "Prisma",
+                "drizzle-orm": "Drizzle ORM",
+                "mongoose": "MongoDB (Mongoose)",
+                "pg": "PostgreSQL",
+                "mysql2": "MySQL",
+                "better-sqlite3": "SQLite",
+                "redis": "Redis",
+                "ioredis": "Redis",
+                "@supabase/supabase-js": "Supabase",
+            }
+            for dep, label in db_map.items():
+                if dep in deps:
+                    add_unique(databases, label)
 
-    if (root / "go.mod").exists():
-        languages.append("Go")
-        test_runners.append("go test")
-    if (root / "Cargo.toml").exists():
-        languages.append("Rust")
-        test_runners.append("cargo test")
+            test_map = {
+                "vitest": "Vitest",
+                "jest": "Jest",
+                "@playwright/test": "Playwright",
+                "playwright": "Playwright",
+                "cypress": "Cypress",
+            }
+            for dep, label in test_map.items():
+                if dep in deps:
+                    add_unique(test_runners, label)
+
+        if (base / "pyproject.toml").exists() or (base / "requirements.txt").exists():
+            add_unique(languages, "Python")
+            py_text = ""
+            for p in ("pyproject.toml", "requirements.txt"):
+                if (base / p).exists():
+                    py_text += (base / p).read_text(encoding="utf-8", errors="ignore").lower()
+            for key, label in [("fastapi", "FastAPI"), ("django", "Django"), ("flask", "Flask")]:
+                if key in py_text:
+                    add_unique(frameworks, label)
+            for key, label in [("sqlalchemy", "SQLAlchemy"), ("psycopg", "PostgreSQL"), ("pymongo", "MongoDB"), ("redis", "Redis")]:
+                if key in py_text:
+                    add_unique(databases, label)
+            if "pytest" in py_text:
+                add_unique(test_runners, "Pytest")
+
+        if (base / "go.mod").exists():
+            add_unique(languages, "Go")
+            add_unique(test_runners, "go test")
+        if (base / "Cargo.toml").exists():
+            add_unique(languages, "Rust")
+            add_unique(test_runners, "cargo test")
 
     infra: list[str] = []
     if (root / "Dockerfile").exists() or (root / "docker-compose.yml").exists() or (root / "compose.yml").exists():

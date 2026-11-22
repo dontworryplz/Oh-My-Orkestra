@@ -90,11 +90,12 @@ chmod +x ./install.sh
 ### 1. Unified `orchestra` CLI
 
 ```bash
+orchestra init                             # Auto-discover repo tech stack & write .orchestra/REPO_MAP.md
 orchestra doctor                           # Verify agy CLI, models & roles
 orchestra stats                            # Telemetry ledger (runs, 429s, latency)
+orchestra sync-mcps                        # Sync Claude/Codex MCPs into OMP & AGY
 orchestra route [--staged]                 # Smart diff/risk agent recommendations
 orchestra review [--staged] [--auto-fallback]  # Structured Neon Code Review
-orchestra sync-mcps                        # Sync Claude/Codex MCPs into OMP & AGY
 orchestra worktree --role sonnet-worker --repo "$PWD" --prompt "..."
 ```
 

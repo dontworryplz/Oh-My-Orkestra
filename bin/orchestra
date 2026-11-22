@@ -24,6 +24,9 @@ CMD="${1:-help}"
 shift || true
 
 case "$CMD" in
+  init|map)
+    exec python3 "$SCRIPTS_DIR/discover-stack.py" "$@"
+    ;;
   doctor|stats|run)
     exec python3 "$SCRIPTS_DIR/agy_agent.py" "$CMD" "$@"
     ;;
@@ -63,6 +66,7 @@ case "$CMD" in
 orchestra — Sol-Luna Full-Set Orchestra CLI
 
 Usage:
+  orchestra init [--cwd PATH]              Discover repo tech stack & write .orchestra/REPO_MAP.md
   orchestra doctor                         Check agy CLI, models, and role routing
   orchestra stats                          Show telemetry ledger summary
   orchestra sync-mcps [--dry-run]          Sync Claude/Codex MCPs into OMP & AGY

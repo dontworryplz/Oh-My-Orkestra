@@ -63,6 +63,7 @@ A harness-agnostic, modular multi-model orchestration system working across **OM
 
 ## Core Execution Sequence
 
+0. **Tech-Stack & Repo Bootstrap (Mandatory on Session Start):** If `.orchestra/REPO_MAP.md` is missing or stale, run `orchestra init` (`scripts/discover-stack.py`) so every agent immediately knows the project's languages, frameworks, DB/ORM, test runners, scripts, and directory layout.
 1. **Memory & Graph First:** Run `trail ask` and `graft` / `codebase-memory-mcp` before broad file reads.
 2. **Grill-Me (if ambiguous):** Resolve design forks branch-by-branch with recommended options before coding.
 3. **Contract & Delegate:** Lock interfaces (`astra-architect`), then dispatch disjoint slices (`luna-task-manager`, `luna-worker`, `sonnet-worker`, `agy-orchestrator`).

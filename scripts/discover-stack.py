@@ -212,6 +212,15 @@ def main() -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "stack-profile.json").write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
         (out_dir / "REPO_MAP.md").write_text(render_markdown(profile), encoding="utf-8")
+        rules_path = out_dir / "rules.md"
+        if not rules_path.exists():
+            rules_path.write_text(
+                "# Project Orchestra Rules (`.orchestra/rules.md`)\n\n"
+                "Add repository-specific invariants here. Every Orchestra agent reads this in Step 0.\n\n"
+                "- Never bypass tenant/auth checks or alter DB schemas without a safe migration.\n"
+                "- Run project-specific test/typecheck commands listed in `.orchestra/REPO_MAP.md` before delivery.\n",
+                encoding="utf-8",
+            )
 
     print(json.dumps(profile, indent=2))
     return 0

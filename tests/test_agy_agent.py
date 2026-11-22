@@ -112,11 +112,18 @@ class TestAgyAgent(unittest.TestCase):
         )
         self.assertEqual(rc, 0)
         self.assertTrue(data["ok"])
-        rc_s, st = self.run_cli("stats")
+        rc_s, st = self.run_cli("stats", "--budget", "5")
         self.assertEqual(rc_s, 0)
         self.assertEqual(st["total_runs"], 1)
         self.assertEqual(st["success_runs"], 1)
         self.assertEqual(st["by_role"]["neon-reviewer"]["ok"], 1)
+        self.assertEqual(st["budget"]["remaining"], 4)
+        self.assertFalse(st["budget"]["exceeded"])
+
+    def test_doctor_with_mcps_flag(self):
+        rc, data = self.run_cli("doctor", "--mcps")
+        self.assertEqual(rc, 0)
+        self.assertIn("mcps", data)
 
     def test_auto_fallback_on_429(self):
         env = self.env.copy()
@@ -148,6 +155,7 @@ class TestAgyAgent(unittest.TestCase):
         self.assertIn("React", profile["frameworks"])
         self.assertIn("Vitest", profile["test_runners"])
         self.assertTrue((root / ".orchestra" / "REPO_MAP.md").exists())
+        self.assertTrue((root / ".orchestra" / "rules.md").exists())
 
     def test_smart_route_detects_security_and_ui(self):
         repo = self.base / "repo"
@@ -157,7 +165,10 @@ class TestAgyAgent(unittest.TestCase):
         subprocess.run(["git", "config", "user.email", "t@example.invalid"], cwd=repo, check=True)
         (repo / "auth.ts").write_text("export const x = 1;\n", encoding="utf-8")
         (repo / "Button.tsx").write_text("export const B = () => null;\n", encoding="utf-8")
-        subprocess.run(["git", "add", "auth.ts", "Button.tsx"], cwd=repo, check=True)
+        (repo / "migrations").mkdir()
+        (repo / "migrations" / "001.sql").write_text("SELECT 1;\n", encoding="utf-8")
+        (repo / "openapi.yaml").write_text("openapi: 3.1.0\n", encoding="utf-8")
+        subprocess.run(["git", "add", "auth.ts", "Button.tsx", "migrations/001.sql", "openapi.yaml"], cwd=repo, check=True)
         router = Path(__file__).resolve().parents[1] / "scripts" / "smart-route.py"
         proc = subprocess.run([sys.executable, str(router), "--staged"], cwd=repo, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -166,6 +177,8 @@ class TestAgyAgent(unittest.TestCase):
         roles = {r["role"] for r in res["recommended_agents"]}
         self.assertIn("security-reviewer", roles)
         self.assertIn("ui-qa-reviewer", roles)
+        self.assertIn("db-migration-auditor", roles)
+        self.assertIn("api-contract-auditor", roles)
 
 
 if __name__ == "__main__":

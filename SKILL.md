@@ -58,12 +58,15 @@ A harness-agnostic, modular multi-model orchestration system working across **OM
 | **Infra / DevOps Auditor** | `infra-devops-auditor` | `gpt-6.2-sol:high` + `aws-mcp` | IAM least-privilege, Docker, CI/CD, CORS/CSP/TLS |
 | **Perf Profiler** | `perf-profiler` | `agy`: `gemini-4-hydrogen-xhigh` | N+1 queries, memory leaks, lock contention, latency |
 | **Visual / UI QA** | `ui-qa-reviewer` | `google-antigravity/gemini-4-argon:high` | Layout/responsive/WCAG/console/TestSprite QA |
+| **DB & Migration Auditor** | `db-migration-auditor` | `anthropic/claude-opus-5-5:high` | Zero-downtime SQL/Prisma/Drizzle/Alembic checks |
+| **API Contract Auditor** | `api-contract-auditor` | `openai-codex/gpt-6.2-astra:high` | OpenAPI/GraphQL/REST breaking-change & drift checks |
+| **Release & PR Manager** | `release-manager` | `openai-codex/gpt-6-luna:max` | PR summary, CHANGELOG, breaking-change & `trail check` |
 | **Parallel Worker (Claude)** | `sonnet-worker` / `antigravity-sonnet-worker` | `claude-sonnet-5-5:high` | Independent coding/UI/API slice, clean refactoring |
 | **Sub-Orchestrator** | `agy-orchestrator` | `agy`: `gemini-pro-orchestrator-neon` | Autonomous multi-step sub-workflow with nested agents |
 
 ## Core Execution Sequence
 
-0. **Tech-Stack & Repo Bootstrap (Mandatory on Session Start):** If `.orchestra/REPO_MAP.md` is missing or stale, run `orchestra init` (`scripts/discover-stack.py`) so every agent immediately knows the project's languages, frameworks, DB/ORM, test runners, scripts, and directory layout.
+0. **Tech-Stack & Repo Bootstrap (Mandatory on Session Start):** If `.orchestra/REPO_MAP.md` is missing or stale, run `orchestra init` (`scripts/discover-stack.py`) so every agent immediately knows the project's languages, frameworks, DB/ORM, test runners, scripts, directory layout, and `.orchestra/rules.md`.
 1. **Memory & Graph First:** Run `trail ask` and `graft` / `codebase-memory-mcp` before broad file reads.
 2. **Grill-Me (if ambiguous):** Resolve design forks branch-by-branch with recommended options before coding.
 3. **Contract & Delegate:** Lock interfaces (`astra-architect`), then dispatch disjoint slices (`luna-task-manager`, `luna-worker`, `sonnet-worker`, `agy-orchestrator`).

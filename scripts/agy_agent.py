@@ -116,7 +116,23 @@ def make_prompt(role: str, cfg: dict[str, Any], user_prompt: str, writable: bool
     )
 
 
-def doctor(out: str | None) -> int:
+def check_mcps() -> dict[str, Any]:
+    mcp_path = Path.home() / ".omp" / "agent" / "mcp.json"
+    if not mcp_path.exists():
+        return {"configured": False, "path": str(mcp_path), "servers": {}}
+    try:
+        data = json.loads(mcp_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"configured": True, "path": str(mcp_path), "error": str(exc), "servers": {}}
+    servers: dict[str, Any] = {}
+    for name, cfg in data.get("mcpServers", {}).items():
+        cmd = cfg.get("command") if isinstance(cfg, dict) else None
+        resolved = shutil.which(cmd) if cmd else None
+        servers[name] = {"command": cmd, "available": resolved is not None, "resolved_path": resolved}
+    return {"configured": True, "path": str(mcp_path), "servers": servers}
+
+
+def doctor(out: str | None, with_mcps: bool = False) -> int:
     exe = shutil.which("agy")
     models, error = get_available_models()
     roles = load_roles()
@@ -124,26 +140,38 @@ def doctor(out: str | None) -> int:
         role: next((m for m in cfg["models"] if m in models), None)
         for role, cfg in roles.items()
     }
-    emit(
-        {
-            "ok": error is None,
-            "agy_path": exe,
-            "model_list_error": error,
-            "models_available": models,
-            "resolved_roles": routes,
-            "ledger_path": str(ledger_path()),
-        },
-        out,
-    )
+    payload: dict[str, Any] = {
+        "ok": error is None,
+        "agy_path": exe,
+        "model_list_error": error,
+        "models_available": models,
+        "resolved_roles": routes,
+        "ledger_path": str(ledger_path()),
+    }
+    if with_mcps:
+        payload["mcps"] = check_mcps()
+    emit(payload, out)
     return 0 if error is None else 1
 
 
-def stats(out: str | None) -> int:
+def stats(out: str | None, budget: int | None = None) -> int:
     path = ledger_path()
+    today = datetime.now(timezone.utc).date().isoformat()
     if not path.exists():
-        emit({"ok": True, "ledger_path": str(path), "total_runs": 0, "by_role": {}, "by_model": {}}, out)
+        payload: dict[str, Any] = {
+            "ok": True,
+            "ledger_path": str(path),
+            "total_runs": 0,
+            "daily_runs_today": 0,
+            "by_role": {},
+            "by_model": {},
+        }
+        if budget is not None:
+            payload["budget"] = {"limit": budget, "remaining": budget, "exceeded": False}
+        emit(payload, out)
         return 0
     total = 0
+    today_runs = 0
     ok_count = 0
     quota_count = 0
     total_elapsed = 0.0
@@ -157,6 +185,8 @@ def stats(out: str | None) -> int:
         except json.JSONDecodeError:
             continue
         total += 1
+        if str(row.get("ts", "")).startswith(today):
+            today_runs += 1
         is_ok = bool(row.get("ok"))
         ok_count += int(is_ok)
         if "429" in str(row.get("error", "")):
@@ -168,19 +198,24 @@ def stats(out: str | None) -> int:
         by_role[role]["ok" if is_ok else "failed"] += 1
         by_model[model]["runs"] += 1
         by_model[model]["ok" if is_ok else "failed"] += 1
-    emit(
-        {
-            "ok": True,
-            "ledger_path": str(path),
-            "total_runs": total,
-            "success_runs": ok_count,
-            "quota_429_runs": quota_count,
-            "avg_elapsed_seconds": round(total_elapsed / total, 2) if total else 0.0,
-            "by_role": dict(by_role),
-            "by_model": dict(by_model),
-        },
-        out,
-    )
+    payload = {
+        "ok": True,
+        "ledger_path": str(path),
+        "total_runs": total,
+        "daily_runs_today": today_runs,
+        "success_runs": ok_count,
+        "quota_429_runs": quota_count,
+        "avg_elapsed_seconds": round(total_elapsed / total, 2) if total else 0.0,
+        "by_role": dict(by_role),
+        "by_model": dict(by_model),
+    }
+    if budget is not None:
+        payload["budget"] = {
+            "limit": budget,
+            "remaining": max(0, budget - today_runs),
+            "exceeded": today_runs >= budget,
+        }
+    emit(payload, out)
     return 0
 
 
@@ -352,9 +387,11 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command_name", required=True)
     dr = sub.add_parser("doctor", help="Verify agy CLI, models, and role routing")
+    dr.add_argument("--mcps", action="store_true", help="Also verify configured MCP server binaries in PATH")
     dr.add_argument("--out", help="Save JSON output to path")
 
     st = sub.add_parser("stats", help="Summarize orchestra telemetry ledger")
+    st.add_argument("--budget", type=int, help="Daily call budget threshold to evaluate")
     st.add_argument("--out", help="Save JSON output to path")
 
     run = sub.add_parser("run", help="Run a headless agy agent and emit normalized JSON")
@@ -375,9 +412,9 @@ def main() -> int:
 
     args = p.parse_args()
     if args.command_name == "doctor":
-        return doctor(args.out)
+        return doctor(args.out, with_mcps=args.mcps)
     if args.command_name == "stats":
-        return stats(args.out)
+        return stats(args.out, budget=args.budget)
     if not 30 <= args.timeout <= 3600:
         emit({"ok": False, "error": "--timeout must be 30..3600"}, args.out)
         return 2

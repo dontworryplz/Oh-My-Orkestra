@@ -17,6 +17,8 @@ INFRA_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 UI_PATTERNS = re.compile(r"\.(tsx|jsx|vue|svelte|css|scss|html)$", re.IGNORECASE)
+DB_MIGRATION_PATTERNS = re.compile(r"(migrations?/|prisma/schema|drizzle|\.sql$|alembic)", re.IGNORECASE)
+API_CONTRACT_PATTERNS = re.compile(r"(openapi|swagger|\.graphql$|\.proto$|/api/.*\.(ts|go|py)$)", re.IGNORECASE)
 
 
 def git_output(args: list[str]) -> str:
@@ -41,6 +43,8 @@ def analyze(staged: bool) -> dict:
     has_security = any(SECURITY_PATTERNS.search(f) for f in files)
     has_infra = any(INFRA_PATTERNS.search(f) for f in files)
     has_ui = any(UI_PATTERNS.search(f) for f in files)
+    has_db = any(DB_MIGRATION_PATTERNS.search(f) for f in files)
+    has_api = any(API_CONTRACT_PATTERNS.search(f) for f in files)
 
     recommended: list[dict[str, str]] = []
     if not files:
@@ -80,6 +84,10 @@ def analyze(staged: bool) -> dict:
         recommended.append({"role": "infra-devops-auditor", "reason": "Infra/CI/Docker/IAM files modified."})
     if has_ui:
         recommended.append({"role": "ui-qa-reviewer", "reason": "Frontend/UI files modified."})
+    if has_db:
+        recommended.append({"role": "db-migration-auditor", "reason": "Database/migration/schema files modified."})
+    if has_api:
+        recommended.append({"role": "api-contract-auditor", "reason": "API/OpenAPI/GraphQL contract files modified."})
 
     recommended.append({"role": "luna-tester", "reason": "Run focused empirical tests before final gate."})
 

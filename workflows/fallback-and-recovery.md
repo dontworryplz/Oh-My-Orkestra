@@ -6,6 +6,7 @@ If any provider or `agy` model returns `429 RESOURCE_EXHAUSTED`, auth failure, o
 1. **Report honestly**: State which slot/model failed and why. Never fabricate or extrapolate a review.
 2. **Use the verified fallback chain**:
    - `openai-codex/gpt-6.2-sol` -> `openai-codex/gpt-6-luna:max` -> `anthropic/claude-opus-5-5`
+   - `openai-codex/gpt-6.2-astra` (`astra-architect`) -> `openai-codex/gpt-6.2-sol` -> `anthropic/claude-opus-5-5`
    - `neon-code-reviewer` (`agy: gemini-4-neon-xhigh`) -> `gemini-4-neon-high` -> `luna-reviewer` (`gpt-6-luna:max`) or `opus-auditor`
    - `hydrogen-debugger` (`agy: gemini-4-hydrogen-xhigh`) -> `gemini-4-hydrogen-high` -> `astra-architect` (`gpt-6.2-astra`)
    - `argon-explorer` (`agy: gemini-4-argon-high`) -> `gemini-3.8-flash-high` -> `luna-explorer` (`gpt-6-luna:max`)

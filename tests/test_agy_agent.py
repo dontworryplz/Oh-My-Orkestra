@@ -15,6 +15,8 @@ import json, os, sys
 args = sys.argv[1:]
 if args == ["models"]:
     print("gemini-4-neon-xhigh           Gemini 4 Neon (XHigh)")
+    print("gemini-4-neon-high            Gemini 4 Neon (High)")
+    print("gemini-4-hydrogen-xhigh       Gemini 4 Hydrogen (XHigh)")
     print("gemini-4-hydrogen-xhigh       Gemini 4 Hydrogen (XHigh)")
     print("gemini-4-argon-high           Gemini 4 Argon (High)")
     print("claude-opus-5-5-high          Claude Opus 5.5 (High)")
@@ -34,6 +36,10 @@ model = args[args.index("--model") + 1]
 mode = args[args.index("--mode") + 1]
 
 if os.getenv("MOCK_AGY_SCENARIO") == "quota":
+    print(json.dumps({"status": "ERROR", "error": "429 RESOURCE_EXHAUSTED", "response": ""}))
+    sys.exit(1)
+
+if os.getenv("MOCK_AGY_SCENARIO") == "quota_xhigh_only" and model == "gemini-4-neon-xhigh":
     print(json.dumps({"status": "ERROR", "error": "429 RESOURCE_EXHAUSTED", "response": ""}))
     sys.exit(1)
 
@@ -111,6 +117,18 @@ class TestAgyAgent(unittest.TestCase):
         self.assertEqual(st["total_runs"], 1)
         self.assertEqual(st["success_runs"], 1)
         self.assertEqual(st["by_role"]["neon-reviewer"]["ok"], 1)
+
+    def test_auto_fallback_on_429(self):
+        env = self.env.copy()
+        env["MOCK_AGY_SCENARIO"] = "quota_xhigh_only"
+        rc, data = self.run_cli(
+            "run", "--role", "neon-reviewer", "--auto-fallback", "--cwd", self.base, "--prompt", "Review", env=env
+        )
+        self.assertEqual(rc, 0)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["model_requested"], "gemini-4-neon-high")
+        self.assertEqual(data["fallback_from"], "gemini-4-neon-xhigh")
+        self.assertEqual(len(data["attempts"]), 2)
 
 
 if __name__ == "__main__":

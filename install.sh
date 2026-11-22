@@ -61,7 +61,11 @@ if [[ -d "$REPO_DIR/omp-agents" ]]; then
     [[ -f "$f" ]] && run_cmd cp "$f" "$AGENTS_DEST/"
   done
 fi
-run_cmd chmod +x "$SKILL_DEST/scripts/agy-run.sh" "$SKILL_DEST/scripts/agy_agent.py" "$SKILL_DEST/scripts/worktree-run.sh" "$SKILL_DEST/scripts/sync-mcps.py" "$SKILL_DEST/hooks/pre-commit"
+run_cmd chmod +x "$SKILL_DEST/bin/orchestra" "$SKILL_DEST/scripts/agy-run.sh" "$SKILL_DEST/scripts/agy_agent.py" "$SKILL_DEST/scripts/worktree-run.sh" "$SKILL_DEST/scripts/sync-mcps.py" "$SKILL_DEST/scripts/smart-route.py" "$SKILL_DEST/hooks/pre-commit"
+
+LOCAL_BIN="$HOME/.local/bin"
+run_cmd mkdir -p "$LOCAL_BIN"
+run_cmd ln -sfn "$SKILL_DEST/bin/orchestra" "$LOCAL_BIN/orchestra"
 
 run_cmd ln -sfn "$SKILL_DEST" "$CLAUDE_SKILLS/sol-luna-orchestrator"
 run_cmd ln -sfn "$SKILL_DEST" "$AGY_SKILLS/sol-luna-orchestrator"

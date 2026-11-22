@@ -87,22 +87,24 @@ chmod +x ./install.sh
 
 ## Usage & CLI Reference
 
-### 1. Health Check & Telemetry
+### 1. Unified `orchestra` CLI
 
 ```bash
-# Verify `agy` binary, live `agy models`, and role resolution
-python3 ~/.omp/agent/skills/sol-luna-orchestrator/scripts/agy_agent.py doctor
-
-# View call counts, success/429 rates, and average latency
-python3 ~/.omp/agent/skills/sol-luna-orchestrator/scripts/agy_agent.py stats
+orchestra doctor                           # Verify agy CLI, models & roles
+orchestra stats                            # Telemetry ledger (runs, 429s, latency)
+orchestra route [--staged]                 # Smart diff/risk agent recommendations
+orchestra review [--staged] [--auto-fallback]  # Structured Neon Code Review
+orchestra sync-mcps                        # Sync Claude/Codex MCPs into OMP & AGY
+orchestra worktree --role sonnet-worker --repo "$PWD" --prompt "..."
 ```
 
-### 2. Run an AGY Specialist Directly
+### 2. Run an AGY Specialist Directly (with `--auto-fallback`)
 
 ```bash
-# Read-only Neon Code Review with strict JSON Schema output
+# Read-only Neon Code Review with strict JSON Schema + automatic 429 model fallback
 python3 ~/.omp/agent/skills/sol-luna-orchestrator/scripts/agy_agent.py run \
   --role neon-reviewer \
+  --auto-fallback \
   --cwd "$PWD" \
   --schema ~/.omp/agent/skills/sol-luna-orchestrator/config/review-schema.json \
   --prompt "Review staged git diff for logic bugs, auth boundaries, and missing edge cases."

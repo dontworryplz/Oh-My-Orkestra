@@ -204,8 +204,11 @@ def run_task(args: argparse.Namespace) -> int:
         emit({"ok": False, "error": error}, args.out)
         return 2
 
-    requested = args.model or next((m for m in cfg["models"] if m in models), None)
-    if not requested or requested not in models:
+    if args.model:
+        candidates = [args.model]
+    else:
+        candidates = [m for m in cfg["models"] if m in models]
+    if not candidates or candidates[0] not in models:
         emit(
             {
                 "ok": False,
@@ -225,110 +228,124 @@ def run_task(args: argparse.Namespace) -> int:
     nesting = bool(args.allow_nesting or cfg.get("allow_nesting", False))
     prompt = make_prompt(args.role, cfg, user_prompt, writable, nesting)
 
-    cmd = [
-        "agy",
-        "--model",
-        requested,
-        "--mode",
-        mode,
-        "--output-format",
-        "json",
-        "--print-timeout",
-        f"{args.timeout}s",
-        "--dangerously-skip-permissions",
-    ]
-    if args.effort:
-        cmd.extend(["--effort", args.effort])
-    if args.schema:
-        cmd.extend(["--json-schema", str(Path(args.schema).expanduser().resolve())])
-    for extra_dir in args.add_dir or []:
-        cmd.extend(["--add-dir", extra_dir])
-    # CRITICAL: attach prompt to -p= so agy never misparses a flag as the prompt
-    cmd.append(f"-p={prompt}")
+    attempts: list[dict[str, Any]] = []
+    max_tries = len(candidates) if args.auto_fallback else 1
 
-    started = time.monotonic()
-    try:
-        proc = command(cmd, timeout=args.timeout + 20, cwd=cwd)
-    except subprocess.TimeoutExpired:
+    for idx, requested in enumerate(candidates[:max_tries]):
+        cmd = [
+            "agy",
+            "--model",
+            requested,
+            "--mode",
+            mode,
+            "--output-format",
+            "json",
+            "--print-timeout",
+            f"{args.timeout}s",
+            "--dangerously-skip-permissions",
+        ]
+        if args.effort:
+            cmd.extend(["--effort", args.effort])
+        if args.schema:
+            cmd.extend(["--json-schema", str(Path(args.schema).expanduser().resolve())])
+        for extra_dir in args.add_dir or []:
+            cmd.extend(["--add-dir", extra_dir])
+        # CRITICAL: attach prompt to -p= so agy never misparses a flag as the prompt
+        cmd.append(f"-p={prompt}")
+
+        started = time.monotonic()
+        try:
+            proc = command(cmd, timeout=args.timeout + 20, cwd=cwd)
+        except subprocess.TimeoutExpired:
+            elapsed = round(time.monotonic() - started, 2)
+            err = f"Timed out after {args.timeout + 20}s"
+            record_ledger({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "role": args.role,
+                "model": requested,
+                "mode": mode,
+                "ok": False,
+                "status": "TIMEOUT",
+                "elapsed_seconds": elapsed,
+                "error": err,
+            })
+            emit({"ok": False, "role": args.role, "model_requested": requested, "error": err}, args.out)
+            return 124
+
         elapsed = round(time.monotonic() - started, 2)
-        err = f"Timed out after {args.timeout + 20}s"
-        record_ledger({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "role": args.role,
-            "model": requested,
-            "mode": mode,
-            "ok": False,
-            "status": "TIMEOUT",
-            "elapsed_seconds": elapsed,
-            "error": err,
-        })
-        emit({"ok": False, "role": args.role, "model_requested": requested, "error": err}, args.out)
-        return 124
+        try:
+            result = json.loads(proc.stdout)
+            if not isinstance(result, dict):
+                raise ValueError("AGY returned non-object JSON")
+        except (ValueError, json.JSONDecodeError) as exc:
+            err = f"Invalid AGY JSON: {exc}"
+            record_ledger({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "role": args.role,
+                "model": requested,
+                "mode": mode,
+                "ok": False,
+                "status": "PARSE_ERROR",
+                "elapsed_seconds": elapsed,
+                "error": err,
+            })
+            emit(
+                {
+                    "ok": False,
+                    "role": args.role,
+                    "model_requested": requested,
+                    "returncode": proc.returncode,
+                    "error": err,
+                    "stdout_tail": proc.stdout[-1500:],
+                    "stderr_tail": proc.stderr[-1500:],
+                    "elapsed_seconds": elapsed,
+                },
+                args.out,
+            )
+            return 1
 
-    elapsed = round(time.monotonic() - started, 2)
-    try:
-        result = json.loads(proc.stdout)
-        if not isinstance(result, dict):
-            raise ValueError("AGY returned non-object JSON")
-    except (ValueError, json.JSONDecodeError) as exc:
-        err = f"Invalid AGY JSON: {exc}"
+        status = result.get("status", "UNKNOWN")
+        success = status == "SUCCESS" and proc.returncode == 0
+        err_msg = result.get("error", "") if not success else ""
+        usage = result.get("usage", {})
+        attempts.append({"model": requested, "status": status, "ok": success, "error": err_msg})
         record_ledger({
             "ts": datetime.now(timezone.utc).isoformat(),
             "role": args.role,
             "model": requested,
             "mode": mode,
-            "ok": False,
-            "status": "PARSE_ERROR",
+            "ok": success,
+            "status": status,
             "elapsed_seconds": elapsed,
-            "error": err,
+            "usage": usage,
+            "error": err_msg,
+            "fallback_from": candidates[0] if idx > 0 else None,
         })
+
+        is_quota = "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg
+        if not success and args.auto_fallback and is_quota and idx + 1 < max_tries:
+            continue
+
         emit(
             {
-                "ok": False,
+                "ok": success,
                 "role": args.role,
                 "model_requested": requested,
+                "fallback_from": candidates[0] if idx > 0 else None,
+                "attempts": attempts,
+                "mode": mode,
+                "status": status,
+                "response": result.get("response", "") if success else "",
+                "error": err_msg,
                 "returncode": proc.returncode,
-                "error": err,
-                "stdout_tail": proc.stdout[-1500:],
-                "stderr_tail": proc.stderr[-1500:],
                 "elapsed_seconds": elapsed,
+                "usage": usage,
+                "stderr_tail": proc.stderr[-1000:] if proc.stderr else "",
             },
             args.out,
         )
-        return 1
-
-    status = result.get("status", "UNKNOWN")
-    success = status == "SUCCESS" and proc.returncode == 0
-    err_msg = result.get("error", "") if not success else ""
-    usage = result.get("usage", {})
-    record_ledger({
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "role": args.role,
-        "model": requested,
-        "mode": mode,
-        "ok": success,
-        "status": status,
-        "elapsed_seconds": elapsed,
-        "usage": usage,
-        "error": err_msg,
-    })
-    emit(
-        {
-            "ok": success,
-            "role": args.role,
-            "model_requested": requested,
-            "mode": mode,
-            "status": status,
-            "response": result.get("response", "") if success else "",
-            "error": err_msg,
-            "returncode": proc.returncode,
-            "elapsed_seconds": elapsed,
-            "usage": usage,
-            "stderr_tail": proc.stderr[-1000:] if proc.stderr else "",
-        },
-        args.out,
-    )
-    return 0 if success else 1
+        return 0 if success else 1
+    return 1
 
 
 def main() -> int:
@@ -352,6 +369,7 @@ def main() -> int:
     run.add_argument("--timeout", type=int, default=600)
     run.add_argument("--allow-write", action="store_true", help="Enable --mode auto for writable tasks")
     run.add_argument("--allow-nesting", action="store_true", help="Permit Depth-2 subagent spawning inside agy")
+    run.add_argument("--auto-fallback", action="store_true", help="Fallback to next listed model on 429 RESOURCE_EXHAUSTED")
     run.add_argument("--add-dir", action="append", help="Extra directory to expose to agy")
     run.add_argument("--out", help="Save JSON output to path")
 

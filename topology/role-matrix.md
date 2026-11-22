@@ -17,6 +17,7 @@ Do not spawn every role mechanically. Pick the exact specialist(s) whose authori
 
 ### GPT-6.2 Astra — Architecture & Contract Analyst (`astra-architect`)
 - **OMP Agent:** `astra-architect` (`openai-codex/gpt-6.2-astra:high`)
+- **Fallback if Astra is unavailable:** `openai-codex/gpt-6.2-sol:high` -> `anthropic/claude-opus-5-5:high`
 - **Owns:** Designing API schemas, type boundaries, state-machine invariants, and edge-case matrices before parallel workers start coding.
 
 ### GPT-6 Luna — Research & Spec Analyst (`terra-analyst`)

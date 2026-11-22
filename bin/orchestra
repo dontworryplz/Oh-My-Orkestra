@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Unified CLI for Sol-Luna Full-Set Orchestra.
+# Commands:
+#   orchestra doctor
+#   orchestra stats
+#   orchestra sync-mcps [--dry-run]
+#   orchestra route [--staged]
+#   orchestra review [--staged] [--auto-fallback]
+#   orchestra run <agy_agent.py run args...>
+#   orchestra worktree <worktree-run.sh args...>
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+  doctor|stats|run)
+    exec python3 "$SCRIPTS_DIR/agy_agent.py" "$CMD" "$@"
+    ;;
+  sync-mcps)
+    exec python3 "$SCRIPTS_DIR/sync-mcps.py" "$@"
+    ;;
+  route)
+    exec python3 "$SCRIPTS_DIR/smart-route.py" "$@"
+    ;;
+  review)
+    STAGED_FLAG=""
+    EXTRA_ARGS=()
+    for a in "$@"; do
+      if [[ "$a" == "--staged" ]]; then
+        STAGED_FLAG="--cached"
+      else
+        EXTRA_ARGS+=("$a")
+      fi
+    done
+    DIFF_STAT="$(git diff $STAGED_FLAG --stat)"
+    if [[ -z "$DIFF_STAT" ]]; then
+      echo '{"ok": true, "skipped": true, "reason": "No diff to review"}'
+      exit 0
+    fi
+    exec python3 "$SCRIPTS_DIR/agy_agent.py" run \
+      --role neon-reviewer \
+      --cwd "$PWD" \
+      --schema "$ROOT_DIR/config/review-schema.json" \
+      "${EXTRA_ARGS[@]}" \
+      --prompt "Review the git diff (${STAGED_FLAG:-working tree}) for P0-P3 bugs, contract drift, and security issues."
+    ;;
+  worktree)
+    exec "$SCRIPTS_DIR/worktree-run.sh" "$@"
+    ;;
+  help|-h|--help)
+    cat <<'EOF'
+orchestra — Sol-Luna Full-Set Orchestra CLI
+
+Usage:
+  orchestra doctor                         Check agy CLI, models, and role routing
+  orchestra stats                          Show telemetry ledger summary
+  orchestra sync-mcps [--dry-run]          Sync Claude/Codex MCPs into OMP & AGY
+  orchestra route [--staged]               Recommend optimal agents for current git diff
+  orchestra review [--staged] [--auto-fallback]  Run structured Neon Code Review on diff
+  orchestra run <args...>                  Run any AGY role via agy_agent.py
+  orchestra worktree <args...>             Run writable AGY agent in isolated git worktree
+EOF
+    ;;
+  *)
+    echo "Unknown command: $CMD (run 'orchestra help')" >&2
+    exit 2
+    ;;
+esac

@@ -40,6 +40,14 @@ A harness-agnostic, modular multi-model orchestration system working across **OM
   - [integrations/trail-code.md](./integrations/trail-code.md) — `trail ask` before explore, `trail note` on learnings, `trail check` before commit.
   - [integrations/gsd-core.md](./integrations/gsd-core.md) — GSD phase lifecycle mapped to Orchestra specialists.
   - [integrations/active-mcps.md](./integrations/active-mcps.md) — Routing for `graft`, `codebase-memory-mcp`, `trail`, `context7`, `TestSprite`, `aws-mcp`, `node_repl`, `colab-mcp`.
+- **Presets (End-to-End Playbooks)**
+  - [presets/feature-build.md](./presets/feature-build.md) — Idea → locked decisions → contracts → parallel slices → multi-model gates → ship.
+  - [presets/hard-bug-hunt.md](./presets/hard-bug-hunt.md) — Reproduction → Argon map → Hydrogen root cause → minimal fix → regression proof.
+  - [presets/pr-review-gate.md](./presets/pr-review-gate.md) — Staged diff → risk route → Neon review → conditional specialists → verdict.
+  - [presets/security-red-team.md](./presets/security-red-team.md) — STRIDE → source-to-sink audit → dual-model red team → fix + negative tests.
+- **Examples & Contribution**
+  - [examples/orchestra-flows.md](./examples/orchestra-flows.md) — Runnable end-to-end CLI runbooks.
+  - [CONTRIBUTING.md](./CONTRIBUTING.md) — Add a role, agent, config mapping, and tests.
 
 ## Quick Routing Matrix
 

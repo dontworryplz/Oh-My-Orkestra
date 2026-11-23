@@ -1,24 +1,67 @@
 # Fallback & Recovery
 
-## 1. Provider Quota / `429 RESOURCE_EXHAUSTED`
+Behaviour when a provider, model, CLI, or worker fails. Rule zero: **degrade honestly, never fabricate a result.**
 
-If any provider or `agy` model returns `429 RESOURCE_EXHAUSTED`, auth failure, or timeout:
-1. **Report honestly**: State which slot/model failed and why. Never fabricate or extrapolate a review.
-2. **Use the verified fallback chain**:
-   - `openai-codex/gpt-6.2-sol` -> `openai-codex/gpt-6-luna:max` -> `anthropic/claude-opus-5-5`
-   - `openai-codex/gpt-6.2-astra` (`astra-architect`) -> `openai-codex/gpt-6.2-sol` -> `anthropic/claude-opus-5-5`
-   - `neon-code-reviewer` (`agy: gemini-4-neon-xhigh`) -> `gemini-4-neon-high` -> `luna-reviewer` (`gpt-6-luna:max`) or `opus-auditor`
-   - `hydrogen-debugger` (`agy: gemini-4-hydrogen-xhigh`) -> `gemini-4-hydrogen-high` -> `astra-architect` (`gpt-6.2-astra`)
-   - `argon-explorer` (`agy: gemini-4-argon-high`) -> `gemini-3.8-flash-high` -> `luna-explorer` (`gpt-6-luna:max`)
-   - `opus-auditor` (`anthropic/claude-opus-5-5`) -> `antigravity-opus-reviewer` (`agy: claude-opus-5-5-high`) -> `neon-code-reviewer`
-   - `sonnet-worker` (`anthropic/claude-sonnet-5-5`) -> `antigravity-sonnet-worker` (`agy: claude-sonnet-5-5-high`) -> `luna-worker`
+## 1. Quota / `429 RESOURCE_EXHAUSTED` / Auth Failure / Timeout
 
-## 2. Partial Worker Failure
+1. Report which slot failed, the exact error, and which fallback answered — never present a fallback verdict as the original model's.
+2. Use `--auto-fallback` (or `orchestra run --auto-fallback`) so `agy_agent.py` walks the ordered model list in `config/roles.json` and returns `fallback_from` + `attempts`.
+3. Verified chains (each stage only after the previous fails):
 
-- If a parallel writer fails mid-slice, inspect `git status` and `git diff` on its owned files before retrying or reassigning.
-- Never run `git reset --hard` or `git checkout -- .` across the repo—dirty user-owned work may exist.
+| Role | Chain |
+|---|---|
+| Sol (conductor) | `gpt-6.2-sol` → `gpt-6-luna:max` → `claude-opus-5-5` |
+| `astra-architect` | `gpt-6.2-astra` → `gpt-6.2-sol` → `claude-opus-5-5` |
+| `luna-*` (worker/tester/manager) | `gpt-6-luna:max` → `claude-sonnet-5-5` |
+| `neon-code-reviewer` | `gemini-4-neon-xhigh` → `-high` → `-medium` → `luna-reviewer` |
+| `hydrogen-debugger` | `gemini-4-hydrogen-xhigh` → `-high` → `astra-architect` |
+| `argon-explorer` | `gemini-4-argon-high` → `-medium` → `gemini-3.8-flash-high` → `luna-explorer` |
+| `opus-auditor` | `claude-opus-5-5` (anthropic) → `agy claude-opus-5-5-high` → `neon-code-reviewer` |
+| `sonnet-worker` | `claude-sonnet-5-5` (anthropic) → `agy claude-sonnet-5-5-high` → `luna-worker` |
+| `agy-orchestrator` | `gemini-pro-orchestrator-neon` → `gemini-pro-orchestrator-g1-pro` |
 
-## 3. `agy` CLI Specifics
+4. Two different fallbacks failing on the same task → stop looping; reduce scope, split the task, or hand the decision back to the user.
 
-- If `agy` hangs or times out, re-run with `--print-timeout 180s` and narrower file scope.
-- If `agy` rejects `-p`, verify `-p="..."` syntax (prompt attached to flag) via `scripts/agy-run.sh`.
+## 2. Budget & Telemetry
+
+```bash
+orchestra stats                  # per-role/model success, latency, 429 count
+orchestra stats --budget 200     # warn when today's call count approaches the budget
+```
+
+- Ledger: `~/.omp/agent/logs/orchestra-ledger.jsonl` (one JSON record per call).
+- Approaching budget → shift mapping/triage to cheaper models (`gemini-4-argon-medium`, `gpt-6-luna`), keep the expensive reviewer for the final gate only.
+
+## 3. Partial Worker Failure
+
+- Inspect `git status` / `git diff` on the failed worker's **owned paths** before retrying — partial edits may be half-correct.
+- Decide explicitly: keep, complete, or revert **only those paths**. Never `git reset --hard`, `git checkout -- .`, or `git stash` across the repo.
+- Reassigning to a different model? Give it the observed diff plus the failure, not the original intent alone.
+
+## 4. `agy` CLI Specifics
+
+| Symptom | Action |
+|---|---|
+| Hangs / no output | Re-run with `--timeout 180` and a narrower file scope |
+| Prompt rejected | Use `-p="..."` (prompt attached to the flag) — see `scripts/agy-run.sh` |
+| Model not found | `orchestra doctor` — compare against live `agy models`; never invent an ID |
+| `429` on xhigh | Let `--auto-fallback` drop to `-high`/`-medium` |
+| Writable agent corrupted a file | Check `git diff` on its owned path first; restore from that file's last good state only |
+
+## 5. MCP / Tool Failure
+
+- Graph MCP down → fall back to targeted `grep` + read, and state "blast radius lower confidence".
+- `trail` missing → read `.trail/learnings/` directly.
+- `context7` unreachable → use the installed package's own types/source as the primary source, not memory.
+- Never fill a missing tool result with plausible prose.
+
+## 6. Environment Blockers
+
+- SSH/network/credential failure: report the exact command and error, plus what was verified locally. Do not claim deployment.
+- Deploy verification needs the real health check (`--health/ready` response) quoted, not inferred from a script's exit hint.
+
+## 7. Post-Incident
+
+1. `trail note` the failure class and the guard that now prevents it.
+2. If the fallback chain was wrong, fix `config/roles.json` (and `config/config.example.yml` in the repo) so the next run inherits it.
+3. If a model is persistently unavailable, mark it in `topology/model-roster.md` rather than silently omitting it.

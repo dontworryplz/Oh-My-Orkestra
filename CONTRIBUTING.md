@@ -77,6 +77,16 @@ cp "$SKILL_DIR/omp-agents/"*.md "$HOME/.omp/agent/agents/"
 
 Never hand-edit the installed copy — it will be overwritten.
 
+To publish to the public repo (tests → sync → commit → push in one step):
+
+```bash
+ORCHESTRA_PUBLISH_DIR=/tmp/Oh-My-Orkestra scripts/publish.sh -m "docs: ..."
+```
+
+`--dry-run` shows the diff without committing; `--no-push` commits locally only.
+`ORCHESTRA_PUBLISH_DIR` defaults to `~/.cache/Oh-My-Orkestra`; the clone is
+created from the public URL when missing.
+
 ## 6. Commit Style
 
 Conventional Commits, subject ≤ 72 chars, body only when the *why* is not obvious.

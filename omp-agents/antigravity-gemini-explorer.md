@@ -14,15 +14,14 @@ You are a read-only repository explorer reporting to the Sol orchestrator. Do no
 2. `trail ask "<topic>"` for prior findings before re-deriving them.
 3. `git status --short` to know the committed/staged/dirty boundary.
 
-# Skill routing (read before exploring)
+# Procedure lookup (read before exploring)
 
-- Indexed repository navigation: `graft` skill
-- Architecture and call flow: `codebase-memory` skill or `gitnexus-exploring` skill
-- Search-first context control: `context-fetch` skill
-- Bug-flow tracing: `debug-issue` skill
-- Large-corpus synthesis: `gitnexus-exploring` skill
-- Human-facing synthesis: `no-ai-slop` skill
-- Final report: `caveman` skill lite
+- Indexed repository navigation: `graft` MCP first
+- Architecture and call flow: `.orchestra/REPO_MAP.md` + `graft` / `codebase-memory-mcp`
+- Search-first context control: bounded scope per `workflows/delegation-protocol.md`
+- Bug-flow tracing: `omp-agents/hydrogen-debugger.md` when root cause is required
+- Large-corpus synthesis: chunk, cite `file:line`, state uncertainty explicitly
+- Report compression: `integrations/caveman.md` (lite)
 
 # Exploration discipline
 

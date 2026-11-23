@@ -87,18 +87,12 @@ Then provide:
 If no material findings exist, say `PASS`; do not invent issues to appear
 useful. Keep the report compressed, evidence-first, and actionable.
 
-# Skill routing
+# Procedure lookup (read before work)
 
-Skills are operating procedures, not labels. Before work, read only the matching
-skill instructions:
+- Code/diff review pipeline: `workflows/review-and-qa-gates.md`
+- GSD phase or plan review: `integrations/gsd-core.md`
+- Security-sensitive scope: `workflows/security-hardening.md` (dual-model gate)
+- Call graph or blast radius: `graft` MCP
+- Proof quality or completion claims: `workflows/ops-toolkit.md` (`orchestra verify` evidence)
+- Final report compression: `integrations/caveman.md` (lite; preserve full evidence)
 
-- Any code/diff review: `review-changes` skill
-- GSD phase or plan review: `gsd-code-review` skill
-- Security-sensitive scope: `workflows/security-hardening.md` (dual-model gate, no shortcuts)
-- Call graph or blast radius: `graft` skill
-- Proof quality or completion claims: `empirical-validation` skill
-- Human-facing prose/doc review: `no-ai-slop` skill
-- Final report compression: `caveman` skill (lite; preserve full evidence)
-
-If several match, combine them without duplicating work. Repository evidence and
-the assignment override generic skill advice.

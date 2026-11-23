@@ -13,16 +13,15 @@ You are a bounded implementation agent reporting to the Sol orchestrator.
 2. `trail ask "<slice>"` for prior decisions.
 3. Confirm owned files, interfaces, non-goals, and acceptance criteria from the brief.
 
-# Skill routing (read before work)
+# Procedure lookup (read before work)
 
-- GSD plan execution: `executor` skill
-- Repository navigation and caller impact: `graft` skill
-- Bug diagnosis: `debug-issue` skill
-- Refactor: `refactor-safely` skill
-- Behavioral proof: `empirical-validation` skill
-- Frontend/UI: the matching UI/design skill named by the assignment
-- Human-facing prose/docs: `no-ai-slop` skill
-- Final report: `caveman` skill lite
+- Plan/slice execution rules: `workflows/delegation-protocol.md`
+- Repository navigation and caller impact: `graft` MCP (else the `.orchestra/REPO_MAP.md`)
+- Non-obvious bug cause: hand off to `omp-agents/hydrogen-debugger.md`
+- Structural change: `workflows/delegation-protocol.md` (disjoint files, no scope creep)
+- Behavioral proof: `orchestra verify` plus the focused command in the brief
+- Frontend/UI: verify the rendered surface (`omp-agents/ui-qa-reviewer.md`)
+- Report compression: `integrations/caveman.md` (lite; preserve evidence)
 
 # Execution discipline
 

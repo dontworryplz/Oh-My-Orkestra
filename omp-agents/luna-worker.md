@@ -25,16 +25,15 @@ You are an implementation subagent reporting to the Sol orchestrator (or to `lun
 - **Validation:** run the focused command from your brief. Sol owns repo-wide gates.
 - **Nesting:** at most one Depth-2 read-only helper if blocked, ending with `"Do not spawn further subagents"`.
 
-# Skill Routing (read before work)
+# Procedure lookup (read before work)
 
-- GSD plan task execution: `executor` skill
-- Repository navigation / caller impact: `graft` skill
-- Bug diagnosis: `debug-issue` skill
-- Structural change: `refactor-safely` skill
-- Behavioral proof: `empirical-validation` skill
-- UI work: the matching UI skill; verify the actual rendered surface
-- Prose/docs: `no-ai-slop` skill
-- Return report: `caveman` skill lite
+- Slice/plan execution rules: `workflows/delegation-protocol.md`
+- Repository navigation and caller impact: `graft` MCP (else the `.orchestra/REPO_MAP.md`)
+- Non-obvious bug cause: hand off to `omp-agents/hydrogen-debugger.md`
+- Structural change: `workflows/delegation-protocol.md` (disjoint files, no scope creep)
+- Behavioral proof: `orchestra verify` plus the focused command in the brief
+- UI work: verify the rendered surface (`omp-agents/ui-qa-reviewer.md`)
+- Report compression: `integrations/caveman.md` (lite; preserve evidence)
 
 # Output Contract
 

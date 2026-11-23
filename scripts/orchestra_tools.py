@@ -27,6 +27,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import providers  # noqa: E402
+
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LEDGER = Path.home() / ".omp" / "agent" / "logs" / "orchestra-ledger.jsonl"
 PRICING_PATH = SKILL_ROOT / "config" / "pricing.json"
@@ -828,6 +832,87 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0 if not errors else 5
 
 
+# ----------------------------------------------------------------- provider review
+
+def _schema_block(schema: dict[str, Any]) -> str:
+    try:
+        text = json.dumps(schema, ensure_ascii=False)
+    except (TypeError, ValueError):
+        text = "{}"
+    return text[:4000]
+
+
+def _review_with_diff_prompt(staged: bool, schema: dict[str, Any], max_chars: int) -> str:
+    diff = git("diff", "--cached") if staged else git("diff")
+    safe = redact_text(diff)[: max(0, int(max_chars))]
+    scope = "staged diff" if staged else "working-tree diff"
+    return (
+        f"Review the {scope} below for P0-P3 bugs, contract drift, and security issues.\n"
+        "Return ONLY a JSON object that matches the schema. No prose, no code fences.\n\n"
+        f"Schema:\n{_schema_block(schema)}\n\n"
+        f"Diff (secrets already masked):\n```diff\n{safe}\n```"
+    )
+
+
+def _provider_review(
+    provider: str,
+    model: str,
+    prompt: str,
+    timeout: int,
+    max_tokens: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    result = providers.complete(provider, model, prompt, timeout=timeout, max_tokens=max_tokens)
+    verdict = _verdict_from({"response": result.get("text", "")}) if result.get("ok") else {}
+    return result, verdict
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """Direct-provider review (no agy). Requires --provider and --model."""
+    root = Path(args.cwd).expanduser().resolve()
+    diff = git("diff", "--cached") if args.staged else git("diff")
+    if not diff.strip():
+        emit({"ok": True, "skipped": True, "reason": "No diff to review"}, args.out)
+        return 0
+    schema_path = Path(args.schema).expanduser() if args.schema else REVIEW_SCHEMA
+    schema = load_json(schema_path)
+    prompt = _review_with_diff_prompt(args.staged, schema, args.max_chars)
+
+    result, verdict = _provider_review(args.provider, args.model, prompt, args.timeout, args.max_tokens)
+    errors = validate_payload(verdict, schema) if verdict else ["no verdict returned"]
+    retried = False
+    if errors and result.get("ok"):
+        retried = True
+        retry_prompt = (
+            prompt
+            + "\n\nPrevious answer failed schema validation: "
+            + "; ".join(errors[:5])
+            + "\nReturn only a valid JSON object."
+        )
+        result, verdict = _provider_review(args.provider, args.model, retry_prompt, args.timeout, args.max_tokens)
+        errors = validate_payload(verdict, schema) if verdict else ["no verdict returned"]
+
+    ok = bool(result.get("ok")) and not errors and verdict.get("verdict") == "PASS"
+    emit(
+        {
+            "ok": ok,
+            "repo": str(root),
+            "scope": "staged" if args.staged else "working-tree",
+            "provider": args.provider,
+            "model": args.model,
+            "retried": retried,
+            "schema_ok": not errors,
+            "schema_errors": errors[:10],
+            "verdict": verdict or None,
+            "usage": result.get("usage"),
+            "error": result.get("error"),
+            "diff_chars": len(diff),
+            "generated_at": now_iso(),
+        },
+        args.out,
+    )
+    return 0 if ok else 1
+
+
 # ------------------------------------------------------------------------ gate
 
 def _kind_allowed(allow: list[str] | None, kind: str) -> bool:
@@ -954,6 +1039,51 @@ def cmd_gate(args: argparse.Namespace) -> int:
         review["reason"] = "--no-review"
     elif args.dry_run:
         review["reason"] = "--dry-run"
+    elif getattr(args, "provider", None):
+        if not ok and not args.keep_going:
+            review["reason"] = "earlier step failed"
+        else:
+            schema_data = load_json(schema)
+            prompt = _review_with_diff_prompt(args.staged, schema_data, getattr(args, "max_chars", 12000))
+            result, verdict = _provider_review(
+                args.provider,
+                getattr(args, "model", "") or "",
+                prompt,
+                args.timeout,
+                getattr(args, "max_tokens", 4000),
+            )
+            errors = validate_payload(verdict, schema_data) if verdict else ["no verdict returned"]
+            retried = False
+            if errors and result.get("ok"):
+                retried = True
+                retry_prompt = (
+                    prompt
+                    + "\n\nPrevious answer failed schema validation: "
+                    + "; ".join(errors[:5])
+                    + "\nReturn only a valid JSON object."
+                )
+                result, verdict = _provider_review(
+                    args.provider,
+                    getattr(args, "model", "") or "",
+                    retry_prompt,
+                    args.timeout,
+                    getattr(args, "max_tokens", 4000),
+                )
+                errors = validate_payload(verdict, schema_data) if verdict else ["no verdict returned"]
+            review.update(
+                {
+                    "ok": bool(result.get("ok")) and not errors and verdict.get("verdict") == "PASS",
+                    "status": verdict.get("verdict", "ERROR" if not result.get("ok") else "INVALID"),
+                    "provider": args.provider,
+                    "model": getattr(args, "model", None),
+                    "schema_ok": not errors,
+                    "schema_errors": errors[:10],
+                    "retried": retried,
+                    "usage": result.get("usage"),
+                    "error": result.get("error"),
+                }
+            )
+            ok = ok and review["ok"]
     elif not shutil.which("agy"):
         review["reason"] = "agy CLI not found on PATH"
     elif not ok and not args.keep_going:
@@ -1287,10 +1417,26 @@ def main() -> int:
     ga.add_argument("--schema", help="Override review schema path")
     ga.add_argument("--allow", action="append", default=[], help="Allow entry: kind:<name> (secret kinds to ignore)")
     ga.add_argument("--no-review", action="store_true", help="Skip the model review step")
+    ga.add_argument("--provider", choices=list(providers.PROVIDERS), help="Review via a direct provider API instead of agy")
+    ga.add_argument("--model", help="Provider model id (required with --provider)")
+    ga.add_argument("--max-tokens", type=int, default=4000, help="Max output tokens for provider review")
+    ga.add_argument("--max-chars", type=int, default=12000, help="Max diff characters sent to the provider")
     ga.add_argument("--keep-going", action="store_true", help="Run every step even after an earlier failure")
     ga.add_argument("--dry-run", action="store_true", help="Print the plan without running checks or review")
     ga.add_argument("--out", help="Save JSON verdict to path")
     ga.set_defaults(func=cmd_gate)
+
+    rv = sub.add_parser("review", help="Direct-provider structured review (no agy)")
+    rv.add_argument("--provider", required=True, choices=list(providers.PROVIDERS))
+    rv.add_argument("--model", required=True)
+    rv.add_argument("--cwd", default=".")
+    rv.add_argument("--staged", action="store_true")
+    rv.add_argument("--schema")
+    rv.add_argument("--timeout", type=int, default=180)
+    rv.add_argument("--max-tokens", type=int, default=4000)
+    rv.add_argument("--max-chars", type=int, default=12000)
+    rv.add_argument("--out", help="Save JSON report to path")
+    rv.set_defaults(func=cmd_review)
 
     va = sub.add_parser("validate", help="Validate a JSON file against a schema (review verdict by default)")
     va.add_argument("--file", required=True)

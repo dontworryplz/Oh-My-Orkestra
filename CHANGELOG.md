@@ -4,6 +4,17 @@ All notable changes to Oh-My-Orkestra. Format: [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-23
+
+### Added
+- `orchestra review --provider openai|anthropic|google --model <id>` — structured review through a direct provider API (stdlib `urllib`, no `agy`, no SDKs). Diff is secret-masked before it leaves the machine; the verdict is schema-validated and retried once.
+- `orchestra gate --provider ... --model ...` — same provider path inside the one-verdict pipeline, with `--max-tokens` / `--max-chars` controls.
+- `scripts/providers.py` — request builders and response parsers for OpenAI, Anthropic, and Google; keys from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`; optional `ORCHESTRA_*_BASE_URL` overrides.
+- `ORCHESTRA_GATE=1` pre-commit gate (secrets + checks), with `ORCHESTRA_GATE_REVIEW=1`, `ORCHESTRA_GATE_PROVIDER`, and `ORCHESTRA_GATE_MODEL` for the model step.
+
+### Changed
+- `orchestra review` routes to the provider path when `--provider` is passed; the agy path is unchanged.
+
 ## [0.5.0] - 2026-11-23
 
 ### Added

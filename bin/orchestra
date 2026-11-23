@@ -53,6 +53,13 @@ case "$CMD" in
     exec python3 "$SCRIPTS_DIR/smart-route.py" "$@"
     ;;
   review)
+    for a in "$@"; do
+      case "$a" in
+        --provider|--provider=*)
+          exec python3 "$SCRIPTS_DIR/orchestra_tools.py" review "$@"
+          ;;
+      esac
+    done
     STAGED_FLAG=""
     EXTRA_ARGS=()
     for a in "$@"; do
@@ -99,6 +106,7 @@ Usage:
   orchestra sync-mcps [--dry-run]          Sync Claude/Codex MCPs into OMP & AGY
   orchestra route [--staged]               Recommend optimal agents for current git diff
   orchestra review [--staged] [--auto-fallback]  Run structured Neon Code Review on diff
+  orchestra review --provider openai|anthropic|google --model M   Review via direct API (no agy)
   orchestra cost [--days N]                Estimate tokens/USD per model from the ledger
   orchestra guard --owned "src/a/**,src/b/**"  Fail when the diff leaves owned paths
   orchestra handoff [--write]              Generate .orchestra/handoff.md from repo + ledger

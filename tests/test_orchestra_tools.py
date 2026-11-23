@@ -520,5 +520,161 @@ class GateTests(unittest.TestCase):
         self.assertEqual(ot._verdict_from(payload), {"verdict": "PASS"})
 
 
+class ProviderTests(unittest.TestCase):
+    def test_build_request_shapes(self):
+        openai = ot.providers.build_request("openai", "gpt-x", "hi", 100)
+        self.assertEqual(openai["url"], "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(openai["body"]["messages"][0]["content"], "hi")
+        anth = ot.providers.build_request("anthropic", "claude-x", "hi", 100)
+        self.assertEqual(anth["headers"]["anthropic-version"], "2023-06-01")
+        self.assertEqual(anth["body"]["max_tokens"], 100)
+        goog = ot.providers.build_request("google", "gemini-x", "hi", 100)
+        self.assertTrue(goog["url"].endswith("/gemini-x:generateContent"))
+
+    def test_build_request_requires_model(self):
+        with self.assertRaises(ValueError):
+            ot.providers.build_request("openai", "", "hi")
+        with self.assertRaises(ValueError):
+            ot.providers.build_request("nope", "m", "hi")
+
+    def test_parse_response_shapes(self):
+        oa = ot.providers.parse_response("openai", {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+        })
+        self.assertEqual(oa["text"], "ok")
+        self.assertEqual(oa["usage"], {"input_tokens": 3, "output_tokens": 4})
+        an = ot.providers.parse_response("anthropic", {
+            "content": [{"text": "a"}, {"text": "b"}],
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+        })
+        self.assertEqual(an["text"], "ab")
+        go = ot.providers.parse_response("google", {
+            "candidates": [{"content": {"parts": [{"text": "g"}]}}],
+            "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 6},
+        })
+        self.assertEqual(go["text"], "g")
+        self.assertEqual(go["usage"], {"input_tokens": 5, "output_tokens": 6})
+
+    def test_complete_requires_key(self):
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
+            result = ot.providers.complete("openai", "m", "hi")
+        self.assertFalse(result["ok"])
+        self.assertIn("missing API key", result["error"])
+
+    def test_complete_parses_http_response(self):
+        class FakeResponse:
+            status = 200
+            def read(self):
+                return b'{"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":1,"completion_tokens":2}}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "k"}, clear=False), \
+             mock.patch.object(ot.providers.urllib.request, "urlopen", return_value=FakeResponse()):
+            result = ot.providers.complete("openai", "m", "hi")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["text"], "hello")
+
+
+class ProviderReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def _verdict_text(self, verdict="PASS"):
+        return json.dumps({
+            "verdict": verdict,
+            "findings": [],
+            "resolved_checks": ["tests"],
+            "residual_uncertainty": [],
+        })
+
+    def test_review_skips_without_diff(self):
+        with mock.patch.object(ot, "git", return_value=""):
+            code, out, _ = run_quiet(
+                ot.cmd_review,
+                ns(provider="openai", model="m", staged=False, cwd=str(self.root), max_chars=100, max_tokens=10),
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(out)["skipped"])
+
+    def test_review_passes_with_valid_verdict(self):
+        with mock.patch.object(ot, "git", return_value="diff --git a/x b/x\n+line\n"), \
+             mock.patch.object(ot.providers, "complete",
+                               return_value={"ok": True, "text": self._verdict_text(), "usage": {}}):
+            code, out, _ = run_quiet(
+                ot.cmd_review,
+                ns(provider="openai", model="m", staged=False, cwd=str(self.root),
+                   max_chars=1000, max_tokens=10, timeout=30),
+            )
+        payload = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["verdict"]["verdict"], "PASS")
+        self.assertTrue(payload["schema_ok"])
+
+    def test_review_retries_once_on_schema_error(self):
+        bad = self._verdict_text("MAYBE")
+        good = self._verdict_text("PASS")
+        with mock.patch.object(ot, "git", return_value="+x\n"), \
+             mock.patch.object(ot.providers, "complete", side_effect=[
+                 {"ok": True, "text": bad, "usage": {}},
+                 {"ok": True, "text": good, "usage": {}},
+             ]) as complete:
+            code, out, _ = run_quiet(
+                ot.cmd_review,
+                ns(provider="anthropic", model="m", staged=False, cwd=str(self.root),
+                   max_chars=1000, max_tokens=10, timeout=30),
+            )
+        payload = json.loads(out)
+        self.assertEqual(complete.call_count, 2)
+        self.assertTrue(payload["retried"])
+        self.assertEqual(code, 0)
+
+    def test_review_reports_provider_error(self):
+        with mock.patch.object(ot, "git", return_value="+x\n"), \
+             mock.patch.object(ot.providers, "complete",
+                               return_value={"ok": False, "error": "HTTP 401: bad key"}):
+            code, out, _ = run_quiet(
+                ot.cmd_review,
+                ns(provider="google", model="m", staged=False, cwd=str(self.root),
+                   max_chars=1000, max_tokens=10, timeout=30),
+            )
+        payload = json.loads(out)
+        self.assertEqual(code, 1)
+        self.assertIn("401", payload["error"])
+
+    def test_gate_provider_review_failure_blocks(self):
+        with mock.patch.object(ot, "git", return_value="+x\n"), \
+             mock.patch.object(ot.providers, "complete",
+                               return_value={"ok": False, "error": "missing API key"}):
+            code, out, _ = run_quiet(
+                ot.cmd_gate,
+                ns(cwd=str(self.root), cmd=["ok=true"], provider="openai", model="m",
+                   max_chars=500, max_tokens=10),
+            )
+        payload = json.loads(out)
+        review = [s for s in payload["steps"] if s["name"] == "review"][0]
+        self.assertEqual(review["provider"], "openai")
+        self.assertFalse(review["ok"])
+        self.assertEqual(code, 1)
+
+    def test_gate_provider_review_pass(self):
+        with mock.patch.object(ot, "git", return_value="+x\n"), \
+             mock.patch.object(ot.providers, "complete",
+                               return_value={"ok": True, "text": self._verdict_text(), "usage": {}}):
+            code, out, _ = run_quiet(
+                ot.cmd_gate,
+                ns(cwd=str(self.root), cmd=["ok=true"], provider="openai", model="m",
+                   max_chars=500, max_tokens=10),
+            )
+        payload = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()

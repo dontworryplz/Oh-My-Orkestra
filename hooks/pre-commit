@@ -4,7 +4,9 @@ set -euo pipefail
 # Optional Git pre-commit hook for Sol-Luna Orchestra.
 # 1. Runs `trail check` if `.trail/` and `trail` CLI exist.
 # 2. If ORCHESTRA_SECRET_GATE=1, blocks staged secrets (private keys, provider tokens, db URLs).
-# 3. If ORCHESTRA_REVIEW_GATE=1, runs structured `neon-reviewer` against staged diff.
+# 3. If ORCHESTRA_GATE=1, runs `orchestra gate --staged` (secrets + checks; add
+#    ORCHESTRA_GATE_REVIEW=1 for the model review, ORCHESTRA_GATE_PROVIDER=... for direct API).
+# 4. If ORCHESTRA_REVIEW_GATE=1, runs structured `neon-reviewer` against staged diff.
 
 SKILL_DIR="${SOL_LUNA_SKILL_DIR:-$HOME/.omp/agent/skills/sol-luna-orchestrator}"
 
@@ -16,6 +18,21 @@ if [[ "${ORCHESTRA_SECRET_GATE:-0}" == "1" ]] && [[ -n "$(git diff --cached)" ]]
   if ! python3 "$SKILL_DIR/scripts/orchestra_tools.py" redact --staged --check >/dev/null; then
     python3 "$SKILL_DIR/scripts/orchestra_tools.py" redact --staged --check || true
     echo "Pre-commit blocked: staged secrets detected. Remove or rotate before committing." >&2
+    exit 1
+  fi
+fi
+
+if [[ "${ORCHESTRA_GATE:-0}" == "1" ]] && [[ -n "$(git diff --cached)" ]]; then
+  GATE_ARGS=(--staged)
+  if [[ "${ORCHESTRA_GATE_REVIEW:-0}" != "1" ]]; then
+    GATE_ARGS+=(--no-review)
+  fi
+  if [[ -n "${ORCHESTRA_GATE_PROVIDER:-}" ]]; then
+    GATE_ARGS+=(--provider "$ORCHESTRA_GATE_PROVIDER")
+    [[ -n "${ORCHESTRA_GATE_MODEL:-}" ]] && GATE_ARGS+=(--model "$ORCHESTRA_GATE_MODEL")
+  fi
+  if ! python3 "$SKILL_DIR/scripts/orchestra_tools.py" gate "${GATE_ARGS[@]}"; then
+    echo "Pre-commit blocked by orchestra gate. Fix the failing step or skip it explicitly." >&2
     exit 1
   fi
 fi

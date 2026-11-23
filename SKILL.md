@@ -29,6 +29,7 @@ A harness-agnostic, modular multi-model orchestration system working across **OM
   - [scripts/sync-mcps.py](./scripts/sync-mcps.py) — Syncs active MCPs (`graft`, `trail`, `context7`, `TestSprite`, `aws-mcp`) into OMP & AGY.
   - [scripts/orchestra_tools.py](./scripts/orchestra_tools.py) — Ops toolkit: `guard`, `verify`, `redact`, `cost`, `handoff`.
   - [config/pricing.json](./config/pricing.json) — Approximate per-model token prices for `orchestra cost`.
+  - [scripts/providers.py](./scripts/providers.py) — Direct OpenAI/Anthropic/Google review without `agy` (`orchestra review --provider`).
   - [hooks/pre-commit](./hooks/pre-commit) — Optional `trail check` + secret + structured `neon-reviewer` gates.
 - **Execution Workflows**
   - [workflows/delegation-protocol.md](./workflows/delegation-protocol.md) — Decomposition, disjoint file ownership, task briefs, and parallel batching.

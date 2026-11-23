@@ -96,6 +96,26 @@ Steps run in order and stop at the first failure (`--keep-going` runs them all):
 
 The combined verdict is written to `.orchestra/gate.json` and exits `1` when any step fails.
 
+Provider path (no agy):
+
+```bash
+export OPENAI_API_KEY=...
+orchestra gate --staged --provider openai --model <model-id>
+orchestra review --provider google --model <model-id> --staged
+```
+
+The diff is masked with `redact_text` before it is sent, the verdict is validated
+against the same schema, and one retry is issued with the schema errors appended.
+Keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`.
+
+Pre-commit wiring:
+
+```bash
+export ORCHESTRA_GATE=1                  # secrets + checks on staged diff
+export ORCHESTRA_GATE_REVIEW=1           # add the model review step
+export ORCHESTRA_GATE_PROVIDER=openai    # review via direct API (needs ORCHESTRA_GATE_MODEL)
+```
+
 ## 7. `orchestra phase` — cost attribution that matches the work
 
 ```bash

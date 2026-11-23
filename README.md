@@ -103,6 +103,7 @@ orchestra cost [--days N]                  # Token/USD estimate per model from t
 orchestra sync-mcps                        # Sync Claude/Codex MCPs into OMP & AGY
 orchestra route [--staged]                 # Smart diff/risk agent recommendations
 orchestra review [--staged] [--auto-fallback]  # Structured Neon Code Review
+orchestra review --provider openai|anthropic|google --model M  # Direct API review (no agy)
 orchestra guard --owned "src/api/**,src/ui/**"  # Fail if the diff leaves owned paths (exit 3)
 orchestra verify [--dry-run]               # Run detected test/typecheck/lint → .orchestra/evidence.json
 orchestra gate [--staged] [--no-review]    # Secrets + verify + schema-validated review → .orchestra/gate.json
@@ -131,9 +132,12 @@ Four commands turn the documentation rules into enforced checks:
 | `orchestra phase` + `cost --by phase` | "Which phase burned the budget?" | `0` |
 
 ```bash
-# Pre-commit gates (opt-in, same style as the review gate)
-export ORCHESTRA_SECRET_GATE=1     # blocks staged provider keys / db URLs
-export ORCHESTRA_REVIEW_GATE=1     # blocks on Neon PASS requirement
+# Pre-commit gates (opt-in)
+export ORCHESTRA_GATE=1            # orchestra gate --staged: secrets + detected checks
+export ORCHESTRA_GATE_REVIEW=1     # also run the model review inside the gate
+export ORCHESTRA_GATE_PROVIDER=openai ORCHESTRA_GATE_MODEL=<id>   # review via direct API
+export ORCHESTRA_SECRET_GATE=1     # secrets only (lighter, no checks)
+export ORCHESTRA_REVIEW_GATE=1     # agy Neon review only
 ```
 
 See [workflows/ops-toolkit.md](./workflows/ops-toolkit.md).
@@ -152,6 +156,20 @@ python3 ~/.omp/agent/skills/sol-luna-orchestrator/scripts/agy_agent.py run \
 # Fast Bash preset
 ~/.omp/agent/skills/sol-luna-orchestrator/scripts/agy-run.sh hydrogen-debugger -- "Trace why auth refresh races on concurrent 401s"
 ```
+
+### 2b. Direct Provider Review (no `agy`, no SDKs)
+
+```bash
+export OPENAI_API_KEY=...        # or ANTHROPIC_API_KEY / GEMINI_API_KEY
+orchestra review --provider openai --model <model-id> --staged
+orchestra gate --staged --provider anthropic --model <model-id>
+```
+
+Model ids are never guessed — pass the exact id your provider uses. The diff is
+secret-masked before sending, the verdict is validated against
+`config/review-schema.json`, and one retry is made if the schema is violated.
+Overrides: `ORCHESTRA_OPENAI_BASE_URL`, `ORCHESTRA_ANTHROPIC_BASE_URL`,
+`ORCHESTRA_GOOGLE_BASE_URL` (proxies/gateways).
 
 > **Important `agy` CLI quirk:** Always attach the prompt with `=` (`-p="..."`). Never pass `-p --model ...` or `agy` will consume `--model` as the prompt string. Both `agy_agent.py` and `agy-run.sh` handle this automatically.
 

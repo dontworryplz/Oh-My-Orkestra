@@ -1,21 +1,89 @@
-name: Orchestra Adapter Tests
+name: Tests & Validation
 
 on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: py${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Compile scripts
+        run: python3 -m py_compile scripts/*.py
+
+      - name: Validate JSON configs
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          files = sorted(pathlib.Path("config").glob("*.json"))
+          files.append(pathlib.Path("config") / "review-schema.json")
+          for f in sorted(set(files)):
+              json.loads(f.read_text())
+              print("ok", f)
+          PY
+
+      - name: Shell syntax
+        run: bash -n install.sh bin/orchestra scripts/*.sh hooks/pre-commit
+
+      - name: Installer dry run
+        run: |
+          chmod +x install.sh
+          ./install.sh --dry-run --skip-sidekicks
+
+      - name: CLI smoke
+        run: |
+          ./bin/orchestra version
+          ./bin/orchestra help
+          ./bin/orchestra cost --pricing config/pricing.json > /dev/null
+          printf 'AWS_KEY=AKIAABCDEFGHIJKLMNOP\n' > /tmp/leak.txt
+          if ./bin/orchestra redact --file /tmp/leak.txt --check; then
+            echo "redact failed to detect a known secret"; exit 1
+          fi
+
+  docs-links:
+    name: Docs links
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Run agy_agent unit tests
-        run: python3 -m unittest discover -s tests -p "test_*.py" -v
-      - name: Validate JSON and shell syntax
+      - name: Every relative markdown link resolves
         run: |
-          python3 -c "import json; json.load(open('config/roles.json'))"
-          bash -n install.sh scripts/agy-run.sh
+          python3 - <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path(".")
+          bad = []
+          link = re.compile(r"\]\((?!https?://|#)([^)#]+)(#[^)]*)?\)")
+          for md in root.rglob("*.md"):
+              if ".git" in md.parts:
+                  continue
+              for match in link.finditer(md.read_text(encoding="utf-8")):
+                  target = match.group(1)
+                  if not (md.parent / target).resolve().exists():
+                      bad.append(f"{md}: {target}")
+          for item in bad:
+              print("broken:", item)
+          sys.exit(1 if bad else 0)
+          PY

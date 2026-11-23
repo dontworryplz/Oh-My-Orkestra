@@ -1,0 +1,55 @@
+name: Feature or role request
+description: Propose a new role, preset, integration, or CLI capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repo optimizes for **evidence, not enthusiasm**. A feature that adds a second source of truth or an unverified model ID will be rejected.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What fails today? Which concrete failure mode (wrong output, lost context, unsafe diff, cost blowup) does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Command/role/flag shape, inputs, outputs, exit codes.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - New CLI command / script behaviour
+        - New role or agent
+        - New preset / workflow
+        - Integration (sidekick system or MCP)
+        - Docs only
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model IDs (if a role is proposed)
+      description: Must exist in `agy models` / `orchestra doctor`. Unverifiable IDs are rejected.
+      placeholder: "gemini-4-hydrogen-xhigh → gemini-4-hydrogen-high"
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Why not an existing role, preset, or command?
+    validations:
+      required: false
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - label: Requires a new dependency or external service
+        - label: Changes an existing exit code or JSON contract
+        - label: Adds a destructive or billable capability (needs maintainer approval)

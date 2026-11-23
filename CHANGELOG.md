@@ -1,0 +1,51 @@
+# Changelog
+
+All notable changes to Oh-My-Orkestra. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: [SemVer](https://semver.org/).
+
+## [Unreleased]
+
+## [0.4.0] - 2026-11-23
+
+### Added
+- `orchestra guard --owned <globs>` — fails (exit 3) when a slice's diff leaves its owned paths; supports `--base`, `--ignore`.
+- `orchestra verify` — detects and runs `test`/`typecheck`/`lint` from the stack profile and manifests, writes `.orchestra/evidence.json`.
+- `orchestra redact` — masks provider keys, JWTs, DB URLs, private keys and secret assignments; `--check` exits 4 for CI/hooks.
+- `orchestra cost` — per-model/per-role token and USD estimate from the ledger with `config/pricing.json`.
+- `orchestra handoff` — generates `.orchestra/handoff.md` from git + ledger + verify evidence, preserving hand-written sections.
+- `orchestra version` + `VERSION` file.
+- `ORCHESTRA_SECRET_GATE` pre-commit gate; `ORCHESTRA_LEDGER` override for tests/CI.
+- `workflows/ops-toolkit.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue/PR templates, multi-version CI.
+
+### Changed
+- Full playbook rewrites: `presets/*`, `workflows/*`, `integrations/*`, `topology/model-roster.md`, `omp-agents/*`.
+- `topology/role-matrix.md` — specialist tier (security, threat-model, infra, perf, UI QA, DB migration, API contract, release) plus sole-authority table.
+- `install.sh` links the installed copy and `bin/orchestra` correctly; new scripts are made executable.
+
+### Fixed
+- Duplicate/stale skill copy between `~/.omp/agent/skills` and the authoring directory.
+- `oran-explorer` → `argon-explorer` typo in `omp-agents/sonnet-worker.md`.
+- Owned-path globs no longer let `*` cross `/`; secret spans no longer re-mask each other.
+
+## [0.3.0] - 2026-11-22
+
+### Added
+- `db-migration-auditor`, `api-contract-auditor`, `release-manager` roles.
+- `orchestra doctor --mcps`, `orchestra stats --budget`.
+- Trail-Code, GSD-Core, active-MCP integration docs; `workflows/rules.md`.
+- Unit tests for `agy_agent.py` (auto-fallback, stack discovery, smart routing).
+
+### Changed
+- Role matrix and roster aligned with live `agy` model IDs (no `5.6` / `6.1`).
+
+## [0.2.0] - 2026-11-21
+
+### Added
+- `orchestra init` / `discover-stack.py`, `orchestra route` / `smart-route.py`, `orchestra review`.
+- `agy_agent.py` with `doctor`, `run`, `stats`, `--auto-fallback`, JSON schema reviews.
+- Nested spawning guardrails (depth 2), isolated `git worktree` runner.
+
+## [0.1.0] - 2026-11-20
+
+### Added
+- Initial multi-harness skill: OMP `task` agents, `agy` bridge, Claude Code subagents.
+- Model topology, role matrix, install script, pre-commit hook.

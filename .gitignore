@@ -3,3 +3,7 @@ __pycache__/
 .DS_Store
 *.bak.*
 /tmp/
+.orchestra/
+*.prev.md
+.env
+.venv/

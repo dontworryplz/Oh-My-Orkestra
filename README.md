@@ -95,13 +95,38 @@ chmod +x ./install.sh
 
 ```bash
 orchestra init                             # Auto-discover repo tech stack & write .orchestra/REPO_MAP.md
-orchestra doctor                           # Verify agy CLI, models & roles
-orchestra stats                            # Telemetry ledger (runs, 429s, latency)
+orchestra doctor [--mcps]                  # Verify agy CLI, models, roles & MCP binaries
+orchestra stats [--budget N]               # Telemetry ledger (runs, 429s, latency, daily budget)
+orchestra cost [--days N]                  # Token/USD estimate per model from the ledger
 orchestra sync-mcps                        # Sync Claude/Codex MCPs into OMP & AGY
 orchestra route [--staged]                 # Smart diff/risk agent recommendations
 orchestra review [--staged] [--auto-fallback]  # Structured Neon Code Review
+orchestra guard --owned "src/api/**,src/ui/**"  # Fail if the diff leaves owned paths (exit 3)
+orchestra verify [--dry-run]               # Run detected test/typecheck/lint → .orchestra/evidence.json
+orchestra redact [--staged] [--check]      # Find/mask secrets before a model sees the diff (exit 4)
+orchestra handoff [--write]                # Generate .orchestra/handoff.md from repo + ledger state
 orchestra worktree --role sonnet-worker --repo "$PWD" --prompt "..."
+orchestra version
 ```
+
+### 1b. Ops Guardrails (v0.4+)
+
+Four commands turn the documentation rules into enforced checks:
+
+| Command | Problem solved | Exit codes |
+|---|---|---|
+| `orchestra guard --owned <globs>` | Subagent edits files outside its slice | `0` clean, `3` violation |
+| `orchestra verify` | "Tests pass" claimed without evidence | `0` green, `1` failure, `2` no checks |
+| `orchestra redact --check` | Secrets leaving the machine in a diff/prompt | `0` clean, `4` secret found |
+| `orchestra handoff --write` | Context lost across sessions/models | `0` |
+
+```bash
+# Pre-commit gates (opt-in, same style as the review gate)
+export ORCHESTRA_SECRET_GATE=1     # blocks staged provider keys / db URLs
+export ORCHESTRA_REVIEW_GATE=1     # blocks on Neon PASS requirement
+```
+
+See [workflows/ops-toolkit.md](./workflows/ops-toolkit.md).
 
 ### 2. Run an AGY Specialist Directly (with `--auto-fallback`)
 
@@ -180,13 +205,68 @@ sol-luna-orchestrator/
 ├── omp-agents/                   # Portable OMP agent definitions
 ├── scripts/
 │   ├── agy_agent.py              # Python adapter (doctor, run, stats)
+│   ├── orchestra_tools.py        # guard / verify / redact / cost / handoff
+│   ├── smart-route.py            # Diff risk routing
+│   ├── discover-stack.py         # `orchestra init` repo map
 │   ├── agy-run.sh                # Fast Bash preset runner
 │   ├── worktree-run.sh           # Isolated git worktree runner
 │   └── sync-mcps.py              # Claude/Codex -> OMP/AGY MCP sync
+├── presets/                      # feature-build, hard-bug-hunt, pr-review-gate, security-red-team
 ├── hooks/
-│   └── pre-commit                # Optional trail + Neon review gate
+│   └── pre-commit                # trail check + optional secret/review gates
 ├── examples/
 │   └── orchestra-flows.md        # End-to-end flow examples
+├── .github/                      # CI matrix, issue/PR templates
+├── VERSION  CHANGELOG.md  SECURITY.md  CODE_OF_CONDUCT.md  CONTRIBUTING.md
 └── tests/
-    └── test_agy_agent.py         # Unit test suite
+    ├── test_agy_agent.py         # Adapter, routing, stack discovery
+    └── test_orchestra_tools.py   # guard, verify, redact, cost, handoff
 ```
+
+---
+
+## Documentation Index
+
+| Doc | Read it when |
+|---|---|
+| [SKILL.md](./SKILL.md) | Installing the contract into a harness; quick routing matrix |
+| [workflows/ops-toolkit.md](./workflows/ops-toolkit.md) | Enforcing ownership, running checks, redacting diffs, cost, handoff |
+| [presets/](./presets/) | You want a complete playbook, not a role description |
+| [workflows/review-and-qa-gates.md](./workflows/review-and-qa-gates.md) | Deciding which gate a diff needs |
+| [workflows/security-hardening.md](./workflows/security-hardening.md) | Auth, tenancy, payments, migrations, cloud config changed |
+| [workflows/delegation-protocol.md](./workflows/delegation-protocol.md) | Splitting work across parallel writers |
+| [workflows/fallback-and-recovery.md](./workflows/fallback-and-recovery.md) | A provider (`429`), model, or worker failed |
+| [workflows/session-handoff.md](./workflows/session-handoff.md) | Context is filling, or work resumes later |
+| [topology/model-roster.md](./topology/model-roster.md) | Choosing a model or checking an ID exists |
+| [topology/role-matrix.md](./topology/role-matrix.md) | Deciding who owns a decision |
+| [agy-bridge/cli-protocol.md](./agy-bridge/cli-protocol.md) | Calling `agy` directly |
+| [integrations/](./integrations/) | Wiring Grill-Me, Caveman, Trail, GSD, MCPs |
+| [examples/orchestra-flows.md](./examples/orchestra-flows.md) | Copy-pasting a working command sequence |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Adding a role, integration, or test |
+
+## Requirements
+
+- Python 3.11+ (stdlib only; no third-party packages required for the CLI and tests)
+- Git (for worktrees, diffs, and the guard/handoff commands)
+- One or more harnesses: OMP (`oh-my-pi`), Antigravity CLI (`agy`), Claude Code
+- Optional: `trail`, `graft`, `context7`, `TestSprite`, `aws-mcp`, `caveman`, `gsd-core` — each skill degrades gracefully with an explicit "tool unavailable" note
+
+## Roadmap
+
+- [x] Multi-harness role topology with verified model IDs
+- [x] Structured JSON review gate with automatic `429` fallback
+- [x] Ops guardrails: owned-path guard, verify evidence, secret redaction, cost, handoff
+- [ ] `orchestra watch` — re-route review gates on file save (opt-in, local only)
+- [ ] Provider-agnostic pricing sync (fetch published prices instead of `config/pricing.json`)
+- [ ] Ledger compaction + per-phase cost attribution
+- [ ] Preset scaffolder (`orchestra preset new <name>`)
+
+Contributions welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) and open an issue before large changes.
+
+## Security
+
+Report vulnerabilities privately via [SECURITY.md](./SECURITY.md). `orchestra redact --check` exists because diffs leave the machine; treat it as a guardrail, not a guarantee.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

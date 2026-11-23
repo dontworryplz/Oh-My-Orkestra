@@ -27,13 +27,16 @@ A harness-agnostic, modular multi-model orchestration system working across **OM
   - [scripts/agy-run.sh](./scripts/agy-run.sh) — Fast Bash wrapper for `agy` role presets.
   - [scripts/worktree-run.sh](./scripts/worktree-run.sh) — Isolated `git worktree` runner for parallel writable agents.
   - [scripts/sync-mcps.py](./scripts/sync-mcps.py) — Syncs active MCPs (`graft`, `trail`, `context7`, `TestSprite`, `aws-mcp`) into OMP & AGY.
-  - [hooks/pre-commit](./hooks/pre-commit) — Optional `trail check` + structured `neon-reviewer` gate.
+  - [scripts/orchestra_tools.py](./scripts/orchestra_tools.py) — Ops toolkit: `guard`, `verify`, `redact`, `cost`, `handoff`.
+  - [config/pricing.json](./config/pricing.json) — Approximate per-model token prices for `orchestra cost`.
+  - [hooks/pre-commit](./hooks/pre-commit) — Optional `trail check` + secret + structured `neon-reviewer` gates.
 - **Execution Workflows**
   - [workflows/delegation-protocol.md](./workflows/delegation-protocol.md) — Decomposition, disjoint file ownership, task briefs, and parallel batching.
   - [workflows/review-and-qa-gates.md](./workflows/review-and-qa-gates.md) — Multi-model QA pipeline (Luna Tester -> Neon Code Reviewer -> Opus 5.5 Auditor -> Sol Gate).
   - [workflows/security-hardening.md](./workflows/security-hardening.md) — STRIDE threat modeling, OWASP/AuthZ/BOLA/SSRF/secret checks, infra/IAM audit, and dual-model red-team gate.
   - [workflows/session-handoff.md](./workflows/session-handoff.md) — `.orchestra/handoff.md` context-transfer protocol.
   - [workflows/fallback-and-recovery.md](./workflows/fallback-and-recovery.md) — `429 RESOURCE_EXHAUSTED` fallback chains, partial failures, and dirty-worktree preservation.
+  - [workflows/ops-toolkit.md](./workflows/ops-toolkit.md) — Enforced guardrails: owned-path `guard`, evidence `verify`, secret `redact`, `cost`, `handoff`.
 - **Integrated Sidekick Systems**
   - [integrations/grill-me.md](./integrations/grill-me.md) — Branch-by-branch decision interview before ambiguous/architectural work.
   - [integrations/caveman.md](./integrations/caveman.md) — Ultra-compressed output & inter-agent reporting (`lite` / `full` / `ultra`).

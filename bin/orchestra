@@ -10,6 +10,8 @@ set -euo pipefail
 #   orchestra review [--staged] [--auto-fallback]
 #   orchestra run <agy_agent.py run args...>
 #   orchestra worktree <worktree-run.sh args...>
+#   orchestra cost|guard|handoff|verify|redact ...
+#   orchestra version
 
 SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$SOURCE" ]]; do
@@ -32,6 +34,9 @@ case "$CMD" in
     ;;
   sync-mcps)
     exec python3 "$SCRIPTS_DIR/sync-mcps.py" "$@"
+    ;;
+  cost|guard|handoff|verify|redact)
+    exec python3 "$SCRIPTS_DIR/orchestra_tools.py" "$CMD" "$@"
     ;;
   route)
     exec python3 "$SCRIPTS_DIR/smart-route.py" "$@"
@@ -61,6 +66,17 @@ case "$CMD" in
   worktree)
     exec "$SCRIPTS_DIR/worktree-run.sh" "$@"
     ;;
+  version|--version|-v)
+    if [[ -f "$ROOT_DIR/VERSION" ]]; then
+      echo "orchestra $(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
+    else
+      echo "orchestra (unversioned)"
+    fi
+    echo "skill: $ROOT_DIR"
+    if git -C "$ROOT_DIR" rev-parse --short HEAD >/dev/null 2>&1; then
+      echo "commit: $(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+    fi
+    ;;
   help|-h|--help)
     cat <<'EOF'
 orchestra — Sol-Luna Full-Set Orchestra CLI
@@ -72,8 +88,14 @@ Usage:
   orchestra sync-mcps [--dry-run]          Sync Claude/Codex MCPs into OMP & AGY
   orchestra route [--staged]               Recommend optimal agents for current git diff
   orchestra review [--staged] [--auto-fallback]  Run structured Neon Code Review on diff
+  orchestra cost [--days N]                Estimate tokens/USD per model from the ledger
+  orchestra guard --owned "src/a/**,src/b/**"  Fail when the diff leaves owned paths
+  orchestra handoff [--write]              Generate .orchestra/handoff.md from repo + ledger
+  orchestra verify [--dry-run] [--only test|typecheck|lint]  Run checks and record evidence
+  orchestra redact [--staged] [--check] [--output F]         Find/mask secrets before model calls
   orchestra run <args...>                  Run any AGY role via agy_agent.py
   orchestra worktree <args...>             Run writable AGY agent in isolated git worktree
+  orchestra version                        Print CLI + skill version and commit
 EOF
     ;;
   *)

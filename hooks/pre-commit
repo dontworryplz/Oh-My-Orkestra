@@ -3,16 +3,26 @@ set -euo pipefail
 
 # Optional Git pre-commit hook for Sol-Luna Orchestra.
 # 1. Runs `trail check` if `.trail/` and `trail` CLI exist.
-# 2. If ORCHESTRA_REVIEW_GATE=1, runs structured `neon-reviewer` against staged diff.
+# 2. If ORCHESTRA_SECRET_GATE=1, blocks staged secrets (private keys, provider tokens, db URLs).
+# 3. If ORCHESTRA_REVIEW_GATE=1, runs structured `neon-reviewer` against staged diff.
+
+SKILL_DIR="${SOL_LUNA_SKILL_DIR:-$HOME/.omp/agent/skills/sol-luna-orchestrator}"
 
 if [[ -d ".trail" ]] && command -v trail >/dev/null 2>&1; then
   trail check
 fi
 
+if [[ "${ORCHESTRA_SECRET_GATE:-0}" == "1" ]] && [[ -n "$(git diff --cached)" ]]; then
+  if ! python3 "$SKILL_DIR/scripts/orchestra_tools.py" redact --staged --check >/dev/null; then
+    python3 "$SKILL_DIR/scripts/orchestra_tools.py" redact --staged --check || true
+    echo "Pre-commit blocked: staged secrets detected. Remove or rotate before committing." >&2
+    exit 1
+  fi
+fi
+
 if [[ "${ORCHESTRA_REVIEW_GATE:-0}" == "1" ]]; then
   DIFF="$(git diff --cached --stat)"
   if [[ -n "$DIFF" ]]; then
-    SKILL_DIR="${SOL_LUNA_SKILL_DIR:-$HOME/.omp/agent/skills/sol-luna-orchestrator}"
     OUT="$(mktemp /tmp/orchestra-precommit-XXXXXX.json)"
     trap 'rm -f "$OUT"' EXIT
     python3 "$SKILL_DIR/scripts/agy_agent.py" run \

@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in the orchestra CLI, scripts, or docs does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste secrets, tokens, or full private diffs. Run `orchestra redact --check` first, or replace values with `<redacted>`.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `orchestra version`
+      placeholder: "orchestra 0.4.0 / commit abc1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      options:
+        - OMP (oh-my-pi)
+        - Antigravity CLI (agy)
+        - Claude Code
+        - CLI only (no model call)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / Python
+      placeholder: "macOS 15, Python 3.12.4"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: Include the observed output or exit code; JSON payloads help.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Repo shape, `.orchestra/stack-profile.json`, ledger row, or a minimal git state. Do not attach real secrets.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I ran `orchestra doctor` and pasted the relevant error
+        - label: I removed secrets from all pasted output (`orchestra redact --check`)

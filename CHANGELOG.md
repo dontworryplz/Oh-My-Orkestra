@@ -4,6 +4,23 @@ All notable changes to Oh-My-Orkestra. Format: [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-23
+
+### Added
+- `orchestra gate` — one command, one verdict: secret scan → detected checks → schema-validated model review, written to `.orchestra/gate.json` (exit 1 on any failing step).
+- `orchestra phase start|end|status|list` — phase tracking in `.orchestra/phase.json`; `orchestra cost --by phase` attributes ledger runs to the phase they happened in.
+- `orchestra validate --file verdict.json` — dependency-free JSON Schema subset validation of review verdicts (exit 5 when invalid).
+- Review schema self-healing: `gate` validates the verdict and retries once with the schema errors appended to the prompt.
+- `orchestra redact --history` — scans added lines across git history with commit/path/line attribution; `--allow kind:<name>|<path glob>` suppresses intentional fixtures.
+- `orchestra cost --csv` — per-model CSV export for spreadsheets.
+- `orchestra doctor --fix` — idempotent re-link/repair via `install.sh --repair`.
+- `orchestra uninstall` — removes the symlinks and copied agent files the installer created (keeps config, ledger, `.orchestra/`).
+- `scripts/publish.sh` — tests → sync → commit → push in one step, with `--dry-run` and `--no-push`.
+
+### Changed
+- `verify` logic extracted into `run_checks()` so `gate` reuses the same detection, timeouts, and evidence file.
+- Chrome-level cleanup: agent docs no longer name third-party skills; they point at this repo's workflows.
+
 ## [0.4.0] - 2026-11-23
 
 ### Added

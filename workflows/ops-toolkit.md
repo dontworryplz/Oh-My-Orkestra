@@ -1,4 +1,4 @@
-# Ops Toolkit: guard, verify, redact, cost, handoff
+# Ops Toolkit: guard, verify, gate, redact, cost, phase, handoff, validate
 
 Five commands that enforce rules the docs otherwise only recommend. All emit JSON (composable with `jq`) and use meaningful exit codes so they work in CI and git hooks.
 
@@ -44,6 +44,18 @@ Detected classes: private keys, AWS access keys, GitHub/OpenAI/Anthropic/Google/
 - Non-overlapping spans are masked as `REDACTED:<kind>`; the rest of the diff stays readable.
 - This is a guardrail, not a guarantee — rotate anything that was already exposed.
 
+History and allowlists:
+
+```bash
+orchestra redact --history --limit 500        # added lines across commits, with sha/path/line
+orchestra redact --history --since v1.0.0     # only commits after a ref
+orchestra redact --history --check            # CI audit: exit 4 on any hit
+orchestra redact --file tests/fixtures.env --allow kind:aws-access-key
+orchestra redact --staged --check --allow kind:db-url
+```
+
+`--allow` takes `kind:<name>` (skip a detector class) or a path glob (skip a file).
+
 ## 4. `orchestra cost` — budget reality check
 
 ```bash
@@ -67,6 +79,45 @@ orchestra handoff --write         # write .orchestra/handoff.md (backs up to han
 - Carries forward the human-authored sections (locked decisions, remaining tasks, open risks) on regeneration; placeholder `<fill: ...>` lines are dropped instead of accumulating.
 - Written report is a claim about state — the resuming agent still verifies against `git diff`.
 
+## 6. `orchestra gate` — one verdict for the whole release bar
+
+```bash
+orchestra gate                 # working tree
+orchestra gate --staged        # what is about to be committed
+orchestra gate --dry-run       # show the plan (checks + review) without running
+orchestra gate --no-review     # secrets + checks only (offline/CI without agy)
+```
+
+Steps run in order and stop at the first failure (`--keep-going` runs them all):
+
+1. **secrets** — `find_secrets` over the scoped diff; `--allow kind:<name>` suppresses fixtures.
+2. **verify** — the same detection as `orchestra verify`; evidence lands in `.orchestra/evidence.json`.
+3. **review** — `neon-reviewer` with `config/review-schema.json`; the verdict is validated locally and retried once with the schema errors appended. Skipped (not failed) when `agy` is absent, with the reason recorded.
+
+The combined verdict is written to `.orchestra/gate.json` and exits `1` when any step fails.
+
+## 7. `orchestra phase` — cost attribution that matches the work
+
+```bash
+orchestra phase start p3-auth
+# ... run specialists ...
+orchestra phase end
+orchestra phase status
+orchestra phase list
+orchestra cost --by phase --days 7
+```
+
+State lives in `.orchestra/phase.json`. Ledger rows are attributed to a phase by the interval they ran in (or by an explicit `phase` field when present); `cost --by phase` prints runs, failures, and USD per phase. Starting a new phase closes the previous one.
+
+## 8. `orchestra validate` — the verdict must match the schema
+
+```bash
+orchestra validate --file .orchestra/review-raw.json   # response envelope is not the verdict
+orchestra validate --file verdict.json --schema config/review-schema.json
+```
+
+Validates a practical JSON Schema subset (type, enum, required, properties, `additionalProperties: false`, items, minimum) with no third-party dependencies. Exit `5` means the model produced a structurally invalid verdict.
+
 ## CI Wiring Example
 
 ```yaml
@@ -89,3 +140,4 @@ export ORCHESTRA_REVIEW_GATE=1
 | `2` | Bad invocation / nothing to run |
 | `3` | Owned-path violation (`guard`) |
 | `4` | Secret detected (`redact --check`) |
+| `5` | Schema-invalid JSON (`validate`, `gate` review) |

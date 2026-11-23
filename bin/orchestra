@@ -29,13 +29,24 @@ case "$CMD" in
   init|map)
     exec python3 "$SCRIPTS_DIR/discover-stack.py" "$@"
     ;;
-  doctor|stats|run)
+  doctor)
+    for a in "$@"; do
+      if [[ "$a" == "--fix" ]]; then
+        exec bash "$ROOT_DIR/install.sh" --repair
+      fi
+    done
+    exec python3 "$SCRIPTS_DIR/agy_agent.py" doctor "$@"
+    ;;
+  uninstall)
+    exec bash "$ROOT_DIR/install.sh" --uninstall "$@"
+    ;;
+  stats|run)
     exec python3 "$SCRIPTS_DIR/agy_agent.py" "$CMD" "$@"
     ;;
   sync-mcps)
     exec python3 "$SCRIPTS_DIR/sync-mcps.py" "$@"
     ;;
-  cost|guard|handoff|verify|redact)
+  cost|guard|handoff|verify|redact|phase|gate|validate)
     exec python3 "$SCRIPTS_DIR/orchestra_tools.py" "$CMD" "$@"
     ;;
   route)
@@ -92,7 +103,12 @@ Usage:
   orchestra guard --owned "src/a/**,src/b/**"  Fail when the diff leaves owned paths
   orchestra handoff [--write]              Generate .orchestra/handoff.md from repo + ledger
   orchestra verify [--dry-run] [--only test|typecheck|lint]  Run checks and record evidence
-  orchestra redact [--staged] [--check] [--output F]         Find/mask secrets before model calls
+  orchestra gate [--staged] [--no-review] [--dry-run]        Secrets + verify + review → one verdict
+  orchestra redact [--staged|--file F|--history] [--check]   Find/mask secrets (exit 4 when found)
+  orchestra phase start|end|status|list <name>               Tag work so cost is attributed per phase
+  orchestra validate --file V.json [--schema S]              Validate a review verdict (exit 5 invalid)
+  orchestra doctor --fix                                   Re-link skill, agents, and binaries
+  orchestra uninstall [--force]                            Remove links/copies this installer created
   orchestra run <args...>                  Run any AGY role via agy_agent.py
   orchestra worktree <args...>             Run writable AGY agent in isolated git worktree
   orchestra version                        Print CLI + skill version and commit

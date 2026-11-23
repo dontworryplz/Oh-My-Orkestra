@@ -6,7 +6,10 @@ Subcommands:
   guard   Fail when the working diff touches files outside the owned paths.
   handoff Generate/maintain .orchestra/handoff.md from real repo + ledger state.
   verify  Run the project's detected test/typecheck/lint commands and record evidence.
-  redact  Find and mask secrets in a diff/file before sending it to a model.
+  redact  Find and mask secrets in a diff/file/history before sending it to a model.
+  phase   Track work phases so the ledger can be priced per phase.
+  gate    Run secret scan + verify + structured review as one verdict.
+  validate Validate a review verdict (or any JSON) against a config schema.
 """
 from __future__ import annotations
 
@@ -169,7 +172,7 @@ def cmd_cost(args: argparse.Namespace) -> int:
 
     for entry in by_model.values():
         entry["elapsed_seconds"] = round(entry["elapsed_seconds"], 2)
-    payload = {
+    payload: dict[str, Any] = {
         "ok": True,
         "ledger_path": str(ledger_path()),
         "pricing_path": args.pricing or str(PRICING_PATH),
@@ -186,10 +189,208 @@ def cmd_cost(args: argparse.Namespace) -> int:
             "reported token usage only. Runs without usage are counted but not priced."
         ),
     }
+    if getattr(args, "by", None) == "phase":
+        payload["by_phase"] = _cost_by_phase(rows, Path(args.cwd).expanduser().resolve())
     if not rows:
         payload["note"] = "No ledger rows in window. Run an agy role first (orchestra run ...)."
+    if getattr(args, "csv", False):
+        lines = ["model,runs,failed,input_tokens,output_tokens,cost_usd"]
+        for model, entry in payload["by_model"].items():
+            lines.append(
+                f"{model},{entry['runs']},{entry['failed']},{entry['input_tokens']},"
+                f"{entry['output_tokens']},{entry['cost_usd']}"
+            )
+        text = "\n".join(lines)
+        if args.out:
+            dest = Path(args.out).expanduser().resolve()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(text + "\n", encoding="utf-8")
+        print(text)
+        return 0
     emit(payload, args.out)
     return 0
+
+
+# ----------------------------------------------------------------------- phase
+
+def phase_path(root: Path) -> Path:
+    return root / ORCH_DIR / "phase.json"
+
+
+def load_phase(root: Path) -> dict[str, Any]:
+    state = load_json(phase_path(root))
+    if not isinstance(state.get("history"), list):
+        state["history"] = []
+    return state
+
+
+def save_phase(root: Path, state: dict[str, Any]) -> Path:
+    path = phase_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _unix(iso: str | None) -> int | None:
+    if not iso:
+        return None
+    try:
+        return int(datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        return None
+
+
+def _close_phase(state: dict[str, Any]) -> dict[str, Any] | None:
+    idx = state.get("current_index")
+    if idx is None or idx >= len(state.get("history", [])):
+        return None
+    entry = state["history"][idx]
+    if not entry.get("ended_at"):
+        entry["ended_at"] = now_iso()
+        started = _unix(entry.get("started_at"))
+        ended = _unix(entry["ended_at"])
+        if started and ended:
+            entry["duration_seconds"] = max(0, ended - started)
+    state["current_index"] = None
+    return entry
+
+
+def _row_phase(row: dict[str, Any], history: list[dict[str, Any]]) -> str:
+    stamped = row.get("phase")
+    if stamped:
+        return str(stamped)
+    ts = _unix(str(row.get("ts") or ""))
+    if ts is None:
+        return "(unphased)"
+    for entry in reversed(history):
+        start = _unix(entry.get("started_at"))
+        end = _unix(entry.get("ended_at")) or int(time.time())
+        if start is not None and start <= ts <= end:
+            return str(entry.get("phase") or "(unnamed)")
+    return "(unphased)"
+
+
+def _cost_by_phase(rows: list[dict[str, Any]], root: Path) -> dict[str, dict[str, Any]]:
+    history = load_phase(root).get("history", [])
+    pricing = load_json(PRICING_PATH)
+    by_phase: dict[str, dict[str, Any]] = defaultdict(lambda: {"runs": 0, "failed": 0, "cost_usd": 0.0})
+    for row in rows:
+        label = _row_phase(row, history)
+        entry = by_phase[label]
+        entry["runs"] += 1
+        if not row.get("ok"):
+            entry["failed"] += 1
+        tokens = _usage_tokens(row.get("usage"))
+        price = _price_for(str(row.get("model") or "unknown"), pricing)
+        if price:
+            entry["cost_usd"] = round(
+                entry["cost_usd"]
+                + (tokens["input"] / 1_000_000.0) * float(price.get("input", 0))
+                + (tokens["output"] / 1_000_000.0) * float(price.get("output", 0)),
+                6,
+            )
+    return dict(sorted(by_phase.items(), key=lambda kv: -kv[1]["cost_usd"]))
+
+
+def cmd_phase(args: argparse.Namespace) -> int:
+    root = Path(args.cwd).expanduser().resolve()
+    state = load_phase(root)
+    action = args.action
+    history = state["history"]
+    current = history[state["current_index"]] if state.get("current_index") is not None else None
+
+    if action == "start":
+        if not args.name:
+            emit({"ok": False, "error": "phase start needs a name"}, args.out)
+            return 2
+        closed = _close_phase(state)
+        entry = {"phase": args.name, "started_at": now_iso()}
+        history.append(entry)
+        state["current_index"] = len(history) - 1
+        save_phase(root, state)
+        emit(
+            {
+                "ok": True,
+                "action": "start",
+                "phase": args.name,
+                "started_at": entry["started_at"],
+                "closed_previous": closed.get("phase") if closed else None,
+                "state_path": str(phase_path(root)),
+            },
+            args.out,
+        )
+        return 0
+
+    if action == "end":
+        if current is None:
+            emit({"ok": False, "error": "no phase is running"}, args.out)
+            return 2
+        if args.name and args.name != current.get("phase"):
+            emit(
+                {"ok": False, "error": f"running phase is {current.get('phase')!r}, not {args.name!r}"},
+                args.out,
+            )
+            return 2
+        closed = _close_phase(state)
+        save_phase(root, state)
+        rows = [
+            row
+            for row in read_ledger()
+            if _row_phase(row, history) == closed.get("phase")
+        ]
+        emit(
+            {
+                "ok": True,
+                "action": "end",
+                "phase": closed.get("phase"),
+                "started_at": closed.get("started_at"),
+                "ended_at": closed.get("ended_at"),
+                "duration_seconds": closed.get("duration_seconds"),
+                "runs": len(rows),
+                "failed_runs": sum(1 for row in rows if not row.get("ok")),
+                "state_path": str(phase_path(root)),
+            },
+            args.out,
+        )
+        return 0
+
+    if action == "status":
+        if current is None:
+            emit({"ok": True, "active": None, "history_count": len(history)}, args.out)
+            return 0
+        started = _unix(current.get("started_at")) or int(time.time())
+        rows = [row for row in read_ledger() if _row_phase(row, history) == current.get("phase")]
+        emit(
+            {
+                "ok": True,
+                "active": current.get("phase"),
+                "started_at": current.get("started_at"),
+                "elapsed_seconds": int(time.time()) - started,
+                "runs": len(rows),
+                "state_path": str(phase_path(root)),
+            },
+            args.out,
+        )
+        return 0
+
+    if action == "list":
+        items = []
+        for entry in history[-20:]:
+            rows = [row for row in read_ledger() if _row_phase(row, history) == entry.get("phase")]
+            items.append(
+                {
+                    "phase": entry.get("phase"),
+                    "started_at": entry.get("started_at"),
+                    "ended_at": entry.get("ended_at"),
+                    "duration_seconds": entry.get("duration_seconds"),
+                    "runs": len(rows),
+                }
+            )
+        emit({"ok": True, "active": current.get("phase") if current else None, "phases": items}, args.out)
+        return 0
+
+    emit({"ok": False, "error": f"unknown action {action!r}"}, args.out)
+    return 2
 
 
 # ----------------------------------------------------------------------- guard
@@ -491,33 +692,49 @@ def cmd_verify(args: argparse.Namespace) -> int:
         emit({"ok": True, "repo": str(root), "checks": checks, "dry_run": True}, args.out)
         return 0
 
+    evidence = run_checks(root, checks, timeout=args.timeout, stop_on_fail=args.stop_on_fail)
+    emit(evidence, args.out)
+    return 0 if evidence["ok"] else 1
+
+
+def run_checks(
+    root: Path,
+    checks: list[dict[str, str]],
+    timeout: int = 900,
+    stop_on_fail: bool = False,
+) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     worst = 0
     for check in checks:
         started = time.monotonic()
-        proc = subprocess.run(
-            check["cmd"],
-            shell=True,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=args.timeout,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                check["cmd"],
+                shell=True,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            tail = ((proc.stdout or "") + (proc.stderr or "")).strip().splitlines()[-20:]
+            exit_code = proc.returncode
+        except subprocess.TimeoutExpired:
+            tail = [f"Timed out after {timeout}s"]
+            exit_code = 124
         duration = round(time.monotonic() - started, 2)
-        tail = ((proc.stdout or "") + (proc.stderr or "")).strip().splitlines()[-20:]
         results.append(
             {
                 "name": check["name"],
                 "cmd": check["cmd"],
-                "exit": proc.returncode,
+                "exit": exit_code,
                 "duration_seconds": duration,
                 "tail": tail,
                 "ts": now_iso(),
             }
         )
-        worst = worst or proc.returncode
-        if proc.returncode != 0 and args.stop_on_fail:
+        worst = worst or exit_code
+        if exit_code != 0 and stop_on_fail:
             break
 
     evidence = {"ok": worst == 0, "repo": str(root), "generated_at": now_iso(), "checks": results}
@@ -527,9 +744,266 @@ def cmd_verify(args: argparse.Namespace) -> int:
         ev_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     except OSError:
         pass
-    payload = dict(evidence, evidence_path=str(ev_path))
-    emit(payload, args.out)
-    return 0 if worst == 0 else 1
+    return dict(evidence, evidence_path=str(ev_path))
+
+
+# ------------------------------------------------------------------ validation
+
+REVIEW_SCHEMA = SKILL_ROOT / "config" / "review-schema.json"
+
+_PYTYPES: dict[str, Any] = {
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, dict),
+    "null": lambda v: v is None,
+}
+
+
+def validate_payload(data: Any, schema: dict[str, Any], where: str = "$") -> list[str]:
+    """Validate a small, practical subset of JSON Schema (no external deps)."""
+    errors: list[str] = []
+    if not isinstance(schema, dict):
+        return [f"{where}: schema is not an object"]
+
+    expected = schema.get("type")
+    if isinstance(expected, str) and expected in _PYTYPES and not _PYTYPES[expected](data):
+        return [f"{where}: expected {expected}, got {type(data).__name__}"]
+
+    enum = schema.get("enum")
+    if isinstance(enum, list) and data not in enum:
+        errors.append(f"{where}: {data!r} not in {enum}")
+
+    if "minimum" in schema and isinstance(data, (int, float)) and not isinstance(data, bool):
+        if data < schema["minimum"]:
+            errors.append(f"{where}: {data} below minimum {schema['minimum']}")
+
+    if isinstance(data, dict):
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        for key in schema.get("required") or []:
+            if key not in data:
+                errors.append(f"{where}.{key}: required but missing")
+        if schema.get("additionalProperties") is False:
+            for key in data:
+                if key not in props:
+                    errors.append(f"{where}.{key}: not allowed by schema")
+        for key, subschema in props.items():
+            if key in data:
+                errors.extend(validate_payload(data[key], subschema, f"{where}.{key}"))
+
+    if isinstance(data, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(data):
+            errors.extend(validate_payload(item, schema["items"], f"{where}[{index}]"))
+    return errors
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    target = Path(args.file).expanduser()
+    if not target.is_file():
+        emit({"ok": False, "error": f"not a file: {target}"}, args.out)
+        return 2
+    schema_path = Path(args.schema).expanduser() if args.schema else REVIEW_SCHEMA
+    schema = load_json(schema_path)
+    if not schema:
+        emit({"ok": False, "error": f"unreadable schema: {schema_path}"}, args.out)
+        return 2
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        emit({"ok": False, "error": f"invalid JSON: {exc}"}, args.out)
+        return 5
+    errors = validate_payload(data, schema)
+    emit(
+        {
+            "ok": not errors,
+            "file": str(target.resolve()),
+            "schema": str(schema_path),
+            "error_count": len(errors),
+            "errors": errors[:25],
+        },
+        args.out,
+    )
+    return 0 if not errors else 5
+
+
+# ------------------------------------------------------------------------ gate
+
+def _kind_allowed(allow: list[str] | None, kind: str) -> bool:
+    for item in allow or []:
+        name = item[5:] if item.startswith("kind:") else item
+        if name.strip() == kind:
+            return True
+    return False
+
+
+def _review_prompt(staged: bool) -> str:
+    scope = "staged diff (git diff --cached)" if staged else "working-tree diff (git diff)"
+    return (
+        f"Review the {scope} for P0-P3 bugs, contract drift, and security issues. "
+        "Return ONLY a JSON object that matches the provided schema. No prose, no code fences."
+    )
+
+
+def _review_once(root: Path, prompt: str, timeout: int, schema: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    out = root / ORCH_DIR / "review-raw.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
+    cmd = [
+        sys.executable,
+        str(SKILL_ROOT / "scripts" / "agy_agent.py"),
+        "run",
+        "--role",
+        "neon-reviewer",
+        "--cwd",
+        str(root),
+        "--schema",
+        str(schema),
+        "--timeout",
+        str(timeout),
+        "--out",
+        str(out),
+        "--prompt",
+        prompt,
+    ]
+    meta: dict[str, Any] = {}
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 120, check=False)
+        meta = {"returncode": proc.returncode, "stderr_tail": (proc.stderr or "")[-400:]}
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return {"ok": False, "error": f"review invocation failed: {exc}"}, meta
+    try:
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("non-object payload")
+        return payload, meta
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": f"unreadable review output: {exc}"}, meta
+
+
+def _verdict_from(payload: dict[str, Any]) -> dict[str, Any]:
+    response = payload.get("response")
+    if isinstance(response, dict):
+        return response
+    if isinstance(response, str):
+        match = re.search(r"\{[\s\S]*\}", response)
+        candidate = match.group(0) if match else response.strip()
+        try:
+            data = json.loads(candidate)
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    root = Path(args.cwd).expanduser().resolve()
+    schema = Path(args.schema).expanduser() if args.schema else REVIEW_SCHEMA
+    steps: list[dict[str, Any]] = []
+    ok = True
+
+    diff = git("diff", "--cached") if args.staged else git("diff")
+    findings = [hit for hit in find_secrets(diff) if not _kind_allowed(args.allow, hit["kind"])]
+    steps.append(
+        {
+            "name": "secrets",
+            "ok": not findings,
+            "finding_count": len(findings),
+            "findings": findings[:20],
+        }
+    )
+    ok = ok and not findings
+
+    if ok or args.keep_going:
+        checks = derive_checks(root)
+        if args.only:
+            wanted = set(args.only)
+            checks = [check for check in checks if check["name"] in wanted]
+        for spec in args.cmd or []:
+            if "=" not in spec:
+                steps.append({"name": "verify", "ok": False, "error": f"--cmd must be name=command, got {spec!r}"})
+                ok = False
+                checks = []
+                break
+            name, command = spec.split("=", 1)
+            checks.append({"name": name.strip(), "cmd": command.strip()})
+        if args.dry_run:
+            steps.append({"name": "verify", "ok": True, "dry_run": True, "checks": checks})
+        elif not checks:
+            steps.append({"name": "verify", "ok": False, "error": "no runnable checks detected"})
+            ok = False
+        else:
+            evidence = run_checks(root, checks, timeout=args.timeout, stop_on_fail=True)
+            steps.append(
+                {
+                    "name": "verify",
+                    "ok": evidence["ok"],
+                    "checks": [
+                        {"name": check["name"], "exit": check["exit"], "duration_seconds": check["duration_seconds"]}
+                        for check in evidence["checks"]
+                    ],
+                    "evidence_path": evidence["evidence_path"],
+                }
+            )
+            ok = ok and evidence["ok"]
+
+    review: dict[str, Any] = {"name": "review", "ok": True, "status": "skipped"}
+    if args.no_review:
+        review["reason"] = "--no-review"
+    elif args.dry_run:
+        review["reason"] = "--dry-run"
+    elif not shutil.which("agy"):
+        review["reason"] = "agy CLI not found on PATH"
+    elif not ok and not args.keep_going:
+        review["reason"] = "earlier step failed"
+    else:
+        prompt = _review_prompt(args.staged)
+        payload, meta = _review_once(root, prompt, args.timeout, schema)
+        verdict = _verdict_from(payload)
+        errors = validate_payload(verdict, load_json(schema))
+        retried = False
+        if errors:
+            retried = True
+            retry_prompt = (
+                prompt
+                + "\n\nYour previous answer failed schema validation: "
+                + "; ".join(errors[:5])
+                + "\nReturn only a valid JSON object."
+            )
+            payload, meta = _review_once(root, retry_prompt, args.timeout, schema)
+            verdict = _verdict_from(payload)
+            errors = validate_payload(verdict, load_json(schema))
+        review.update(
+            {
+                "ok": not errors and verdict.get("verdict") == "PASS",
+                "status": verdict.get("verdict", "INVALID"),
+                "schema_ok": not errors,
+                "schema_errors": errors[:10],
+                "retried": retried,
+                "findings": len(verdict.get("findings") or []),
+                "model_meta": meta,
+            }
+        )
+        ok = ok and review["ok"]
+    steps.append(review)
+
+    verdict_payload = {
+        "ok": ok,
+        "repo": str(root),
+        "scope": "staged" if args.staged else "working-tree",
+        "generated_at": now_iso(),
+        "steps": steps,
+    }
+    path = root / ORCH_DIR / "gate.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(verdict_payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    emit(dict(verdict_payload, gate_path=str(path)), args.out)
+    return 0 if ok else 1
 
 
 # ---------------------------------------------------------------------- redact
@@ -603,7 +1077,96 @@ def redact_text(text: str) -> str:
     return "".join(out)
 
 
+def _allowed(allow: list[str] | None, kind: str, path: str | None = None) -> bool:
+    for item in allow or []:
+        entry = item.strip()
+        if entry.startswith("kind:"):
+            if entry[5:].strip() == kind:
+                return True
+        elif path and fnmatch.fnmatch(path, entry.lstrip("./")):
+            return True
+    return False
+
+
+def _filter_findings(findings: list[dict[str, Any]], allow: list[str] | None) -> list[dict[str, Any]]:
+    return [hit for hit in findings if not _allowed(allow, str(hit.get("kind")), hit.get("path"))]
+
+
+def _scan_history(limit: int, since: str | None) -> list[dict[str, Any]]:
+    """Scan added lines in git history, attributing each hit to commit/path/line."""
+    rev_args = ["log", "--no-color", "--unified=0", "-p", f"-n{int(limit)}", "--format=%x00%H%x00%s"]
+    if since:
+        rev_args.append(f"{since}..HEAD")
+    text = git(*rev_args)
+    findings: list[dict[str, Any]] = []
+    sha = ""
+    subject = ""
+    path: str | None = None
+    new_line = 0
+    in_header = True
+    for line in text.splitlines():
+        if line.startswith("\x00"):
+            parts = line.split("\x00")
+            sha = parts[1] if len(parts) > 1 else ""
+            subject = parts[2] if len(parts) > 2 else ""
+            path = None
+            new_line = 0
+            in_header = True
+            continue
+        if line.startswith("diff --git "):
+            path = None
+            in_header = True
+            continue
+        if line.startswith("+++ "):
+            target = line[4:].strip()
+            path = None if target == "/dev/null" else (target[2:] if target.startswith("b/") else target)
+            in_header = False
+            continue
+        if line.startswith("@@"):
+            match = re.search(r"\+(\d+)(?:,\d+)?", line)
+            if match:
+                new_line = int(match.group(1))
+            in_header = False
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            if path and new_line:
+                for hit in find_secrets(line[1:]):
+                    findings.append(
+                        {
+                            "kind": hit["kind"],
+                            "preview": hit["preview"],
+                            "path": path,
+                            "line": new_line,
+                            "sha": sha[:12],
+                            "subject": subject[:120],
+                        }
+                    )
+            new_line += 1
+            continue
+        if line.startswith(" ") and path and new_line and not in_header:
+            new_line += 1
+    return findings
+
+
 def cmd_redact(args: argparse.Namespace) -> int:
+    if getattr(args, "history", False):
+        limit = max(1, int(getattr(args, "limit", 200) or 200))
+        findings = _filter_findings(_scan_history(limit, getattr(args, "since", None)), args.allow)
+        payload: dict[str, Any] = {
+            "ok": not findings,
+            "source": f"git history (last {limit} commits" + (f" since {args.since}" if args.since else "") + ")",
+            "clean": not findings,
+            "finding_count": len(findings),
+            "findings": findings[:100],
+            "truncated": len(findings) > 100,
+        }
+        if args.check:
+            payload["action"] = "blocked" if findings else "allowed"
+            emit(payload, args.out)
+            return 4 if findings else 0
+        emit(payload, args.out)
+        return 0
+
     if args.file:
         path = Path(args.file).expanduser()
         if not path.is_file():
@@ -611,31 +1174,38 @@ def cmd_redact(args: argparse.Namespace) -> int:
             return 2
         text = path.read_text(encoding="utf-8", errors="replace")
         source = str(path)
+        rel_path = str(path)
     elif args.staged:
         text = git("diff", "--cached")
         source = "git diff --cached"
+        rel_path = None
     elif args.text:
         text = args.text
         source = "argument"
+        rel_path = None
     elif not sys.stdin.isatty():
         text = sys.stdin.read()
         source = "stdin"
+        rel_path = None
     else:
         text = git("diff")
         source = "git diff"
+        rel_path = None
     if not text.strip():
         emit({"ok": True, "source": source, "clean": True, "findings": [], "note": "No content to scan."}, args.out)
         return 0
 
-    hits = find_secrets(text)
+    hits = _filter_findings(find_secrets(text), args.allow)
     redacted = redact_text(text)
-    payload: dict[str, Any] = {
+    payload = {
         "ok": not hits,
         "source": source,
         "clean": not hits,
         "finding_count": len(hits),
         "findings": hits,
     }
+    if getattr(args, "allow", None):
+        payload["allow"] = args.allow
     if args.check:
         payload["action"] = "blocked" if hits else "allowed"
         emit(payload, args.out)
@@ -659,6 +1229,9 @@ def main() -> int:
     c = sub.add_parser("cost", help="Estimate token usage and USD cost from the ledger")
     c.add_argument("--days", type=int, default=0, help="Only rows newer than N days (0 = all)")
     c.add_argument("--pricing", help="Override pricing table path")
+    c.add_argument("--by", choices=["phase"], help="Add a breakdown by phase (reads .orchestra/phase.json)")
+    c.add_argument("--cwd", default=".", help="Repo root used to resolve .orchestra/phase.json")
+    c.add_argument("--csv", action="store_true", help="Print a per-model CSV instead of JSON")
     c.add_argument("--out", help="Save JSON to path")
     c.set_defaults(func=cmd_cost)
 
@@ -690,9 +1263,40 @@ def main() -> int:
     r.add_argument("--staged", action="store_true")
     r.add_argument("--text")
     r.add_argument("--check", action="store_true", help="Exit 4 if any secret is found (CI/pre-commit use)")
+    r.add_argument("--history", action="store_true", help="Scan added lines across git history")
+    r.add_argument("--limit", type=int, default=200, help="Commits to scan with --history (default 200)")
+    r.add_argument("--since", help="Only scan commits after this ref (with --history)")
+    r.add_argument("--allow", action="append", default=[], help="Allow entry: kind:<name> or a path glob")
     r.add_argument("--output", help="Write redacted content to this file")
     r.add_argument("--out", help="Save JSON report to path")
     r.set_defaults(func=cmd_redact)
+
+    ph = sub.add_parser("phase", help="Track work phases so cost can be attributed per phase")
+    ph.add_argument("action", choices=["start", "end", "status", "list"])
+    ph.add_argument("name", nargs="?", help="Phase name (start) or expected name (end)")
+    ph.add_argument("--cwd", default=".")
+    ph.add_argument("--out", help="Save JSON to path")
+    ph.set_defaults(func=cmd_phase)
+
+    ga = sub.add_parser("gate", help="Secret scan + verify + structured review as one verdict")
+    ga.add_argument("--cwd", default=".")
+    ga.add_argument("--staged", action="store_true", help="Gate the staged diff instead of the working tree")
+    ga.add_argument("--only", action="append", choices=["test", "typecheck", "lint"])
+    ga.add_argument("--cmd", action="append", help="Extra check as name=shell command")
+    ga.add_argument("--timeout", type=int, default=900)
+    ga.add_argument("--schema", help="Override review schema path")
+    ga.add_argument("--allow", action="append", default=[], help="Allow entry: kind:<name> (secret kinds to ignore)")
+    ga.add_argument("--no-review", action="store_true", help="Skip the model review step")
+    ga.add_argument("--keep-going", action="store_true", help="Run every step even after an earlier failure")
+    ga.add_argument("--dry-run", action="store_true", help="Print the plan without running checks or review")
+    ga.add_argument("--out", help="Save JSON verdict to path")
+    ga.set_defaults(func=cmd_gate)
+
+    va = sub.add_parser("validate", help="Validate a JSON file against a schema (review verdict by default)")
+    va.add_argument("--file", required=True)
+    va.add_argument("--schema", help="Schema path (default: config/review-schema.json)")
+    va.add_argument("--out", help="Save JSON report to path")
+    va.set_defaults(func=cmd_validate)
 
     args = p.parse_args()
     try:

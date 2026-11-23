@@ -40,6 +40,17 @@ def ns(**kwargs) -> argparse.Namespace:
         "text": None,
         "check": False,
         "output": None,
+        "schema": None,
+        "action": None,
+        "name": None,
+        "history": False,
+        "limit": 200,
+        "since": None,
+        "allow": [],
+        "by": None,
+        "csv": False,
+        "keep_going": False,
+        "no_review": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -292,6 +303,221 @@ class HandoffTests(unittest.TestCase):
     def test_extract_section_ignores_placeholders(self):
         md = "## 4. Remaining Tasks (ordered)\n\n- <fill: task>\n- real task\n\n## 5. Open Risks\n"
         self.assertEqual(ot._extract_section(md, "4. Remaining Tasks"), ["- real task"])
+
+
+class PhaseTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.ledger = self.root / "ledger.jsonl"
+        patch = mock.patch.dict(os.environ, {"ORCHESTRA_LEDGER": str(self.ledger)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_start_status_end_cycle(self):
+        code, out, _ = run_quiet(ot.cmd_phase, ns(action="start", name="p2-auth", cwd=str(self.root)))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["phase"], "p2-auth")
+
+        code, out, _ = run_quiet(ot.cmd_phase, ns(action="status", cwd=str(self.root)))
+        status = json.loads(out)
+        self.assertEqual(status["active"], "p2-auth")
+        self.assertGreaterEqual(status["elapsed_seconds"], 0)
+
+        code, out, _ = run_quiet(ot.cmd_phase, ns(action="end", name="p2-auth", cwd=str(self.root)))
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["phase"], "p2-auth")
+
+        code, out, _ = run_quiet(ot.cmd_phase, ns(action="status", cwd=str(self.root)))
+        self.assertIsNone(json.loads(out)["active"])
+
+    def test_end_without_start_fails(self):
+        code, out, _ = run_quiet(ot.cmd_phase, ns(action="end", cwd=str(self.root)))
+        self.assertEqual(code, 2)
+        self.assertFalse(json.loads(out)["ok"])
+
+    def test_end_name_mismatch_fails(self):
+        run_quiet(ot.cmd_phase, ns(action="start", name="one", cwd=str(self.root)))
+        code, out, _ = run_quiet(ot.cmd_phase, ns(action="end", name="two", cwd=str(self.root)))
+        self.assertEqual(code, 2)
+        self.assertFalse(json.loads(out)["ok"])
+
+    def test_start_auto_closes_previous(self):
+        run_quiet(ot.cmd_phase, ns(action="start", name="one", cwd=str(self.root)))
+        code, out, _ = run_quiet(ot.cmd_phase, ns(action="start", name="two", cwd=str(self.root)))
+        self.assertEqual(json.loads(out)["closed_previous"], "one")
+
+    def test_cost_attributes_rows_to_phase(self):
+        run_quiet(ot.cmd_phase, ns(action="start", name="p1", cwd=str(self.root)))
+        self.ledger.write_text(
+            json.dumps({"ts": ot.now_iso(), "model": "claude-opus-5-5-high", "role": "reviewer",
+                        "ok": True, "usage": {"input_tokens": 1000, "output_tokens": 500}}) + "\n",
+            encoding="utf-8",
+        )
+        run_quiet(ot.cmd_phase, ns(action="end", cwd=str(self.root)))
+        with mock.patch.object(ot, "PRICING_PATH", self.root / "missing.json"):
+            code, out, _ = run_quiet(ot.cmd_cost, ns(by="phase", cwd=str(self.root)))
+        payload = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertIn("p1", payload["by_phase"])
+        self.assertEqual(payload["by_phase"]["p1"]["runs"], 1)
+
+    def test_cost_csv(self):
+        self.ledger.write_text(
+            json.dumps({"ts": ot.now_iso(), "model": "m1", "role": "r", "ok": True,
+                        "usage": {"input_tokens": 10, "output_tokens": 5}}) + "\n",
+            encoding="utf-8",
+        )
+        code, out, _ = run_quiet(ot.cmd_cost, ns(csv=True))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip().splitlines()[0], "model,runs,failed,input_tokens,output_tokens,cost_usd")
+        self.assertIn("m1,1,0,10,5", out)
+
+
+class RedactHistoryTests(unittest.TestCase):
+    def test_history_finds_secret_and_check_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess = __import__("subprocess")
+            def git(*a):
+                return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True,
+                                      env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                                           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"})
+            git("init", "-q", "-b", "main")
+            (repo / "app.env").write_text("AWS_KEY=" + FAKE_AWS + "\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-q", "-m", "add config")
+            (repo / "app.env").write_text("clean\n", encoding="utf-8")
+            git("commit", "-q", "-am", "remove config")
+
+            with mock.patch.object(ot, "git", side_effect=lambda *a: subprocess.run(
+                ["git", *a], cwd=repo, capture_output=True, text=True).stdout):
+                code, out, _ = run_quiet(ot.cmd_redact, ns(history=True, check=True, limit=50, allow=[]))
+            payload = json.loads(out)
+            self.assertEqual(code, 4)
+            self.assertEqual(payload["finding_count"], 1)
+            self.assertEqual(payload["findings"][0]["path"], "app.env")
+            self.assertNotIn(FAKE_AWS, json.dumps(payload))
+
+    def test_allow_kind_suppresses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess = __import__("subprocess")
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            (repo / "a.env").write_text("AWS_KEY=" + FAKE_AWS + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com",
+                            "commit", "-q", "-m", "add"], cwd=repo, check=True)
+            with mock.patch.object(ot, "git", side_effect=lambda *a: subprocess.run(
+                ["git", *a], cwd=repo, capture_output=True, text=True).stdout):
+                code, out, _ = run_quiet(ot.cmd_redact,
+                                         ns(history=True, check=True, limit=50, allow=["kind:aws-access-key"]))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out)["finding_count"], 0)
+
+
+class ValidateTests(unittest.TestCase):
+    def _verdict(self, **over):
+        data = {
+            "verdict": "PASS",
+            "findings": [],
+            "resolved_checks": ["tests"],
+            "residual_uncertainty": [],
+        }
+        data.update(over)
+        return data
+
+    def test_valid_verdict_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            path.write_text(json.dumps(self._verdict()), encoding="utf-8")
+            code, out, _ = run_quiet(ot.cmd_validate, ns(file=str(path)))
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(out)["ok"])
+
+    def test_missing_field_fails_with_five(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            data = self._verdict()
+            del data["residual_uncertainty"]
+            path.write_text(json.dumps(data), encoding="utf-8")
+            code, out, _ = run_quiet(ot.cmd_validate, ns(file=str(path)))
+        payload = json.loads(out)
+        self.assertEqual(code, 5)
+        self.assertTrue(any("residual_uncertainty" in e for e in payload["errors"]))
+
+    def test_bad_enum_and_extra_key_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            path.write_text(json.dumps(self._verdict(verdict="MAYBE", extra=1)), encoding="utf-8")
+            code, out, _ = run_quiet(ot.cmd_validate, ns(file=str(path)))
+        errors = json.loads(out)["errors"]
+        self.assertEqual(code, 5)
+        self.assertTrue(any("not in" in e for e in errors))
+        self.assertTrue(any("not allowed" in e for e in errors))
+
+    def test_invalid_json_returns_five(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            path.write_text("{not json", encoding="utf-8")
+            code, _, _ = run_quiet(ot.cmd_validate, ns(file=str(path)))
+        self.assertEqual(code, 5)
+
+    def test_finding_item_schema(self):
+        bad = self._verdict(findings=[{"severity": "P9", "title": "x", "file": "a.py",
+                                       "line": 0, "scenario": "s", "fix": "f"}])
+        errors = ot.validate_payload(bad, ot.load_json(ot.REVIEW_SCHEMA))
+        self.assertTrue(any("severity" in e for e in errors))
+        self.assertTrue(any("line" in e for e in errors))
+
+
+class GateTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "tests").mkdir()
+        (self.root / "tests" / "test_x.py").write_text("import unittest\n", encoding="utf-8")
+
+    def test_dry_run_reports_plan(self):
+        code, out, _ = run_quiet(ot.cmd_gate, ns(cwd=str(self.root), dry_run=True))
+        payload = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertEqual([s["name"] for s in payload["steps"]], ["secrets", "verify", "review"])
+        self.assertEqual(payload["steps"][2]["reason"], "--dry-run")
+
+    def test_failing_check_fails_gate(self):
+        code, out, _ = run_quiet(
+            ot.cmd_gate,
+            ns(cwd=str(self.root), cmd=["boom=false"], dry_run=False, no_review=False, keep_going=False),
+        )
+        payload = json.loads(out)
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+        review = [s for s in payload["steps"] if s["name"] == "review"][0]
+        self.assertEqual(review["status"], "skipped")
+
+    def test_passing_check_without_agy_skips_review(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ot.shutil, "which", return_value=None):
+            code, out, _ = run_quiet(
+                ot.cmd_gate, ns(cwd=tmp, cmd=["ok=true"], dry_run=False, no_review=False)
+            )
+        payload = json.loads(out)
+        review = [s for s in payload["steps"] if s["name"] == "review"][0]
+        self.assertEqual(review["status"], "skipped")
+        self.assertIn("agy", review["reason"])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(code, 0)
+
+    def test_gate_writes_verdict_file(self):
+        with mock.patch.object(ot.shutil, "which", return_value=None):
+            run_quiet(ot.cmd_gate, ns(cwd=str(self.root), cmd=["ok=true"], no_review=False))
+        self.assertTrue((self.root / ".orchestra" / "gate.json").is_file())
+
+    def test_verdict_parse_handles_fences(self):
+        payload = {"response": "```json\n{\"verdict\": \"PASS\"}\n```"}
+        self.assertEqual(ot._verdict_from(payload), {"verdict": "PASS"})
 
 
 if __name__ == "__main__":

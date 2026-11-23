@@ -86,6 +86,8 @@ chmod +x ./install.sh
 | `--with-hooks` | Installs `hooks/pre-commit` into the current Git repo (if inside a git repository) |
 | `--skip-sidekicks` | Skips cloning/installing external `caveman`, `trail-code`, `gsd-core` |
 | `--dry-run` | Prints planned actions without modifying any files |
+| `--repair` | Idempotent re-link of skill, agents, and binaries (`orchestra doctor --fix`) |
+| `--uninstall` | Removes installer-created links/copies; keeps `config.yml`, ledger, `.orchestra/` |
 
 ---
 
@@ -103,7 +105,11 @@ orchestra route [--staged]                 # Smart diff/risk agent recommendatio
 orchestra review [--staged] [--auto-fallback]  # Structured Neon Code Review
 orchestra guard --owned "src/api/**,src/ui/**"  # Fail if the diff leaves owned paths (exit 3)
 orchestra verify [--dry-run]               # Run detected test/typecheck/lint → .orchestra/evidence.json
-orchestra redact [--staged] [--check]      # Find/mask secrets before a model sees the diff (exit 4)
+orchestra gate [--staged] [--no-review]    # Secrets + verify + schema-validated review → .orchestra/gate.json
+orchestra redact [--staged|--history] [--check]  # Find/mask secrets in a diff or git history (exit 4)
+orchestra phase start <name> | end | status | list    # Attribute ledger cost to a work phase
+orchestra cost [--days N] [--by phase] [--csv]        # Token/USD estimates, per model/role/phase
+orchestra validate --file verdict.json     # Validate a review verdict against the schema (exit 5)
 orchestra handoff [--write]                # Generate .orchestra/handoff.md from repo + ledger state
 orchestra worktree --role sonnet-worker --repo "$PWD" --prompt "..."
 orchestra version
@@ -119,6 +125,10 @@ Four commands turn the documentation rules into enforced checks:
 | `orchestra verify` | "Tests pass" claimed without evidence | `0` green, `1` failure, `2` no checks |
 | `orchestra redact --check` | Secrets leaving the machine in a diff/prompt | `0` clean, `4` secret found |
 | `orchestra handoff --write` | Context lost across sessions/models | `0` |
+| `orchestra gate` | "Looks fine" without secrets+checks+review in one place | `0` ship, `1` blocked |
+| `orchestra redact --history` | Secrets already committed in earlier commits | `0` clean, `4` found |
+| `orchestra validate` | Model verdict drifts from the review schema | `0` valid, `5` invalid |
+| `orchestra phase` + `cost --by phase` | "Which phase burned the budget?" | `0` |
 
 ```bash
 # Pre-commit gates (opt-in, same style as the review gate)

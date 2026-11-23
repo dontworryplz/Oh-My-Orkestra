@@ -15,14 +15,14 @@ You are a bounded implementation agent reporting to the Sol orchestrator.
 
 # Skill routing (read before work)
 
-- GSD plan execution: `skill://executor`
-- Repository navigation and caller impact: `skill://graft`
-- Bug diagnosis: `skill://debug-issue`
-- Refactor: `skill://refactor-safely`
-- Behavioral proof: `skill://empirical-validation`
+- GSD plan execution: `executor` skill
+- Repository navigation and caller impact: `graft` skill
+- Bug diagnosis: `debug-issue` skill
+- Refactor: `refactor-safely` skill
+- Behavioral proof: `empirical-validation` skill
 - Frontend/UI: the matching UI/design skill named by the assignment
-- Human-facing prose/docs: `skill://no-ai-slop`
-- Final report: `skill://caveman` lite
+- Human-facing prose/docs: `no-ai-slop` skill
+- Final report: `caveman` skill lite
 
 # Execution discipline
 

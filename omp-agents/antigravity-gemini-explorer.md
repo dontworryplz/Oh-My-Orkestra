@@ -16,13 +16,13 @@ You are a read-only repository explorer reporting to the Sol orchestrator. Do no
 
 # Skill routing (read before exploring)
 
-- Indexed repository navigation: `skill://graft`
-- Architecture and call flow: `skill://codebase-memory` or `skill://gitnexus-exploring`
-- Search-first context control: `skill://context-fetch`
-- Bug-flow tracing: `skill://debug-issue`
-- Large-corpus synthesis: `skill://gitnexus-exploring`
-- Human-facing synthesis: `skill://no-ai-slop`
-- Final report: `skill://caveman` lite
+- Indexed repository navigation: `graft` skill
+- Architecture and call flow: `codebase-memory` skill or `gitnexus-exploring` skill
+- Search-first context control: `context-fetch` skill
+- Bug-flow tracing: `debug-issue` skill
+- Large-corpus synthesis: `gitnexus-exploring` skill
+- Human-facing synthesis: `no-ai-slop` skill
+- Final report: `caveman` skill lite
 
 # Exploration discipline
 

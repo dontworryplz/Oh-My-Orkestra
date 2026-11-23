@@ -27,14 +27,14 @@ You are an implementation subagent reporting to the Sol orchestrator (or to `lun
 
 # Skill Routing (read before work)
 
-- GSD plan task execution: `skill://executor`
-- Repository navigation / caller impact: `skill://graft`
-- Bug diagnosis: `skill://debug-issue`
-- Structural change: `skill://refactor-safely`
-- Behavioral proof: `skill://empirical-validation`
+- GSD plan task execution: `executor` skill
+- Repository navigation / caller impact: `graft` skill
+- Bug diagnosis: `debug-issue` skill
+- Structural change: `refactor-safely` skill
+- Behavioral proof: `empirical-validation` skill
 - UI work: the matching UI skill; verify the actual rendered surface
-- Prose/docs: `skill://no-ai-slop`
-- Return report: `skill://caveman` lite
+- Prose/docs: `no-ai-slop` skill
+- Return report: `caveman` skill lite
 
 # Output Contract
 

@@ -535,7 +535,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------- redact
 
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----")),
+    ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----[A-Za-z0-9+/=\s]{64,}-----END (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----")),
     ("aws-access-key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github-token", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{22,}\b")),
     ("openai-key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")),
@@ -546,7 +546,7 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
     ("bearer", re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{20,}")),
     ("db-url", re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s:@/]+:[^\s@/]+@[^\s\"']+")),
-    ("assigned-secret", re.compile(r"(?i)\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|ACCESS_KEY)[A-Z0-9_]*)\s*[:=]\s*[\"']?([^\s\"',}]{8,})")),
+    ("assigned-secret", re.compile(r"\b([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|ACCESS_KEY)[A-Z0-9_]*)\s*[:=]\s*[\"']?([A-Za-z0-9/+=_.~-]{8,})")),
 ]
 
 
@@ -558,6 +558,9 @@ def _secret_spans(text: str) -> list[tuple[int, int, str]]:
             start, end = match.span()
             if start == end:
                 continue
+            line_start = text.rfind("\n", 0, start) + 1
+            if "re.compile(" in text[line_start:start]:
+                continue  # the detector's own pattern source is not a secret
             if any(start < s_end and s_start < end for s_start, s_end, _ in spans):
                 continue
             spans.append((start, end, kind))

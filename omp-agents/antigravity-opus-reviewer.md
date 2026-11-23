@@ -92,13 +92,13 @@ useful. Keep the report compressed, evidence-first, and actionable.
 Skills are operating procedures, not labels. Before work, read only the matching
 skill instructions:
 
-- Any code/diff review: `skill://review-changes`
-- GSD phase or plan review: `skill://gsd-code-review`
-- Security-sensitive scope: `skill://eresus-guard`
-- Call graph or blast radius: `skill://graft`
-- Proof quality or completion claims: `skill://empirical-validation`
-- Human-facing prose/doc review: `skill://no-ai-slop`
-- Final report compression: `skill://caveman` (lite; preserve full evidence)
+- Any code/diff review: `review-changes` skill
+- GSD phase or plan review: `gsd-code-review` skill
+- Security-sensitive scope: `workflows/security-hardening.md` (dual-model gate, no shortcuts)
+- Call graph or blast radius: `graft` skill
+- Proof quality or completion claims: `empirical-validation` skill
+- Human-facing prose/doc review: `no-ai-slop` skill
+- Final report compression: `caveman` skill (lite; preserve full evidence)
 
 If several match, combine them without duplicating work. Repository evidence and
 the assignment override generic skill advice.

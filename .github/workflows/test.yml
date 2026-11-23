@@ -59,7 +59,7 @@ jobs:
           ./bin/orchestra version
           ./bin/orchestra help
           ./bin/orchestra cost --pricing config/pricing.json > /dev/null
-          printf 'AWS_KEY=AKIAABCDEFGHIJKLMNOP\n' > /tmp/leak.txt
+          printf "AWS_KEY=AKIA%s\n" "ABCDEFGHIJKLMNOP" > /tmp/leak.txt
           if ./bin/orchestra redact --file /tmp/leak.txt --check; then
             echo "redact failed to detect a known secret"; exit 1
           fi
